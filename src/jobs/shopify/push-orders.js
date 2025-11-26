@@ -205,11 +205,11 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
       await job.save();
 
-      // if (pageCount === 4) {
-      //   console.log("🚀 ~ pageCount: breaking");
-      //   // Do something specific for page 4
-      //   break;
-      // }
+      if (pageCount === 4) {
+        console.log("🚀 ~ pageCount: breaking");
+        // Do something specific for page 4
+        break;
+      }
 
       if (!newNextToken) break;
       nextToken = newNextToken;
