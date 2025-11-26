@@ -3,9 +3,7 @@ import GetGrapqlClient from "./graphql-client";
 const createShopifyOrder = async (orderData) => {
   try {
     const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
-    const { lineItems, shippingAddress, amazonOrderId } = orderData;
-
-    const shippingLine = shippingAddress?.shippingLine || null;
+    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLine } = orderData;
 
     const mutation = `
           mutation orderCreate(
@@ -54,16 +52,34 @@ const createShopifyOrder = async (orderData) => {
 
     const variables = {
       order: {
-        email: shippingAddress?.email || "",
+        email: buyerEmail,
         lineItems: lineItems,
-        shippingAddress: shippingAddress ? shippingAddress : null,
-        tags: [`AMAZON_ORDER:${amazonOrderId}`],
+        shippingAddress: shippingAddress || null,
+        billingAddress: shippingAddress || null,
+        note: `Imported from Amazon Order ID: ${amazonOrderId}`,
+        financialStatus: "PAID",
+        tags: [`Amazon`],
         customAttributes: [
           { key: "Amazon Order ID", value: String(amazonOrderId) },
           { key: "FulfillmentChannel", value: "MFN" },
+          { key: "ShipServiceLevel", value: "Priority" },
+          { key: "Notice", value: "This marketplace order has been imported automatically by our Custom app." },
         ],
         shippingLines: shippingLine ? [shippingLine] : [],
       },
+      transactions: [
+        {
+          kind: "SALE",
+          status: "SUCCESS",
+          gateway: "Amazon",
+          amountSet: {
+            shopMoney: {
+              amount: totalAmount,
+              currencyCode: "EUR",
+            },
+          },
+        },
+      ],
       options: null
     };
 
@@ -78,7 +94,6 @@ const createShopifyOrder = async (orderData) => {
   } catch (error) {
     console.error("❌ Shopify order creation failed:", error);
     return { success: false, error: error.message };
-
   }
 };
 

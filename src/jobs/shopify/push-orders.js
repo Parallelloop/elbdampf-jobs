@@ -1,11 +1,12 @@
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
-import { mapAmazonToShopifyOrders } from "../../helper/helper";
+import Orders from "../../database/models/orders";
+import { sleep } from "../../helper/helper";
 import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
 import GetGrapqlClient from "../../services/shopify/graphql-client";
 import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
-import { fetchAmazonFBMOrders, fetchAmazonOrderItems } from "../../services/sp-api/order";
+import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/order";
 import { JOB_STATES } from "../../utils/constants";
 import { clean } from "../../utils/generators";
 
@@ -14,141 +15,209 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
   console.log("*****************   Push Orders Shofiy Job    *******************");
   console.log("*********************************************************");
   try {
-    // const users = await DB.users.findAll({});
-    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || "2025-10-01T12:10:02";
-    const amazonOrders = await fetchAmazonFBMOrders(lastUpdatedAfter);
-    const ordersList = amazonOrders?.Orders || [];
+    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || "2025-11-24T12:10:02";
+    let nextToken = null;
+    let pageCount = 0;
+    while (true) {
+      const { amazonOrders, nextToken: newNextToken } = await fetchAmazonFBMOrdersPage({
+        nextToken,
+        lastUpdatedAfter,
+      });
 
-    console.log(`🚀 Fetched ${ordersList.length} Amazon orders`);
-    if (!ordersList.length) {
-      console.log("No new Amazon orders to process.");
-    }
-    console.log("🚀 ~ file: some-job.js:15 ~ Agenda.define ~ amazonOrders:", JSON.stringify(ordersList, null, 2));
-
-    for (const amazonOrder of ordersList) {
-      console.log("Processing Amazon order:", amazonOrder.AmazonOrderId);
-      const orderId = amazonOrder.AmazonOrderId;
-      const amazonItemsResp = await fetchAmazonOrderItems(orderId);
-      const amazonOrderItems = amazonItemsResp?.OrderItems || [];
-      const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
-      const shopifyLineItems = [];
-
-      if (!buyerEmail) {
-        console.log(`⚠️ Skipping order ${amazonOrder.AmazonOrderId} — no buyer email`);
-        continue;
+      if (!amazonOrders.length) {
+        console.log("No new Amazon orders to process.");
       }
+      // console.log("🚀 ~ file: some-job.js:15 ~ Agenda.define ~ amazonOrders:", JSON.stringify(ordersList, null, 2));
+      pageCount++;
+      console.log(`📦 Processing page #${pageCount} — Orders: ${amazonOrders.length}`);
 
-      const shipping = amazonOrder?.ShippingAddress || {};
-      const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
-      const fullName = clean(shipping?.Name) || "";
-      const firstName = fullName.split(" ")[0] || "";
-      const lastName = fullName.split(" ").slice(1).join(" ") || "";
-      const address = {
-        address1: clean(shipping?.AddressLine1) || "",
-        address2: clean(shipping?.AddressLine2) || "",
-        city: clean(shipping?.City) || clean(addressFrom?.City) || "",
-        countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
-        zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
-        phone: clean(shipping?.Phone) || clean(amazonOrder?.BuyerInfo?.BuyerPhone) || "",
-      };
-      // console.log("🚀 ~ amazonOrderItems:", JSON.stringify(amazonOrderItems, null, 2));
+      for (const amazonOrder of amazonOrders) {
+        const shopifyLineItems = [];
+        const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
+        const orderId = amazonOrder?.AmazonOrderId;
+        const shipping = amazonOrder?.ShippingAddress || {};
+        const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
+        const fullName = clean(shipping?.Name) || "";
+        const firstName = fullName.split(" ")[0] || "";
+        const lastName = fullName.split(" ").slice(1).join(" ") || "";
+        const address = {
+          address1: clean(shipping?.AddressLine1) || "",
+          address2: clean(shipping?.AddressLine2) || "",
+          city: clean(shipping?.City) || clean(addressFrom?.City) || "",
+          countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
+          zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
+          phone: clean(shipping?.Phone) || clean(amazonOrder?.BuyerInfo?.BuyerPhone) || "",
+        };
+        console.log("Processing Amazon order:", orderId);
 
-      for (const item of amazonOrderItems) {
-        const sku = item.SellerSKU;
-        const qty = item.QuantityOrdered || 1;
-        const variantResult = await findVariantProduct({ query: sku });
-        if (!variantResult.success || variantResult.variants.length === 0) {
-          console.warn(`No variant found for SKU: ${sku}`);
+        if (!buyerEmail) {
+          console.log(`⚠️ Skipping order ${orderId} — no buyer email`);
           continue;
         }
-        const variant = variantResult.variants[0];
 
-        shopifyLineItems.push({
-          variantId: variant.id,
-          variantTitle: variant.title || "Variant Item",
-          quantity: qty,
-          title: item.Title || "Product Item",
-          priceSet: {
-            shopMoney: {
-              amount: item.ItemPrice?.Amount || variant?.price,
-              currencyCode: item.ItemPrice?.CurrencyCode || "EUR"
-            }
-          },
-          sku: sku,
-          taxLines: item.ItemTax
-            ? [
+        let dbOrder = await DB.orders.findOne({ where: { orderId: orderId } });
+        if (dbOrder && dbOrder?.isPosted) {
+          console.log(`⏩ Order ${orderId} already posted to Shopify. Skipping...`);
+          continue;
+        }
+
+        if (!dbOrder) {
+          dbOrder = await DB.orders.create({
+            orderId: orderId,
+            orderStatus: amazonOrder.OrderStatus,
+            purchaseDate: amazonOrder.PurchaseDate,
+            isPosted: false,
+            buyerEmail: buyerEmail,
+            buyerName: fullName,
+            addressLine1: address?.address1 || "",
+            addressLine2: address?.address2 || "",
+            city: address?.city || "",
+            stateOrRegion: shipping?.StateOrRegion || "",
+            postalCode: address?.zip || "",
+            countryCode: address?.countryCode || "",
+            addressType: shipping?.AddressType || "",
+            orderErrors: null,
+          });
+          console.log(`💾 Saved new Amazon order in DB: ${orderId}`);
+        }
+
+        const amazonItemsResp = await fetchAmazonOrderItems(orderId);
+        const amazonOrderItems = amazonItemsResp?.OrderItems || [];
+        console.log("🚀 ~ amazonOrderItems:", JSON.stringify(amazonOrderItems, null, 2));
+        let subtotal = 0;
+        let taxTotal = 0;
+        for (const item of amazonOrderItems) {
+          const itemTax = parseFloat(item?.ItemTax?.Amount || 0);
+          const sku = item?.SellerSKU;
+          const qty = item?.QuantityOrdered || 1;
+          const variantResult = await findVariantProduct({ query: sku });
+          if (!variantResult.success || variantResult.variants.length === 0) {
+            console.warn(`⚠️ ⚠️ ⚠️ No variant found for SKU: ${sku} ⚠️ ⚠️ ⚠️`);
+            continue;
+          }
+          const price = parseFloat(item?.ItemPrice?.Amount || variant?.price || 0);
+          const variant = variantResult.variants[0];
+          subtotal += price * qty;
+          taxTotal += itemTax;
+
+          shopifyLineItems.push({
+            variantId: variant.id,
+            variantTitle: variant.title || "Variant Item",
+            quantity: qty,
+            title: item.Title || "Product Item",
+            requiresShipping: true,
+            priceSet: {
+              shopMoney: {
+                amount: price,
+                currencyCode: item.ItemPrice?.CurrencyCode || "EUR"
+              }
+            },
+            sku: sku,
+            taxLines: itemTax ? [
               {
                 title: "VAT",
-                rate: parseFloat(item?.ItemTax?.Amount) / parseFloat(item?.ItemPrice?.Amount),
+                rate:
+                  parseFloat(itemTax) /
+                  parseFloat(price || 1),
                 priceSet: {
                   shopMoney: {
-                    amount: item?.ItemTax?.Amount,
+                    amount: parseFloat(itemTax),
                     currencyCode: item?.ItemTax?.CurrencyCode
                   }
                 }
               }
             ]
-            : []
+              : []
+          });
+
+          if (shopifyLineItems.length === 0) {
+            console.log(`⚠️ No mapped line items for Amazon order ${orderId}`);
+            continue;
+          }
+        }
+
+        const totalAmount = subtotal + taxTotal;
+
+        let shopifyCustomer = await getCustomerByEmail(buyerEmail);
+        if (!shopifyCustomer) {
+          const newCustomerPayload = {
+            email: buyerEmail,
+            phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
+            firstName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[0] || "Amazon",
+            lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
+            addresses: [address],
+            taxExempt: false,
+            ...(amazonOrder?.BuyerInfo?.BuyerPhone
+              ? {
+                smsMarketingConsent: {
+                  marketingState: "NOT_SUBSCRIBED",
+                  marketingOptInLevel: "SINGLE_OPT_IN",
+                },
+              }
+              : {}),
+          };
+
+          shopifyCustomer = await createCustomer(newCustomerPayload);
+          if (shopifyCustomer?.success) {
+            shopifyCustomer = shopifyCustomer.customer;
+            console.log(`✅ Created new Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
+          } else {
+            console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
+          }
+
+        } else {
+          if (Array.isArray(shopifyCustomer?.edges)) {
+            shopifyCustomer = shopifyCustomer?.edges[0]?.node;
+          }
+          console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
+        }
+        const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
+
+        const createOrderResp = await createShopifyOrder({
+          buyerEmail,
+          totalAmount,
+          shippingLine: null,
+          lineItems: shopifyLineItems,
+          shippingAddress: shippingAddressForOrder,
+          amazonOrderId: orderId,
         });
 
-        if (shopifyLineItems.length === 0) {
-          console.log(`⚠️ No mapped line items for Amazon order ${orderId}`);
+        if (!createOrderResp.success) {
+          await DB.Orders.update({
+            orderErrors: createOrderResp.error || createOrderResp.errors || "Unknown Shopify error"
+          },
+            { where: { orderId: orderId } }
+          );
+
+          console.error(`❌ Failed Shopify order for Amazon ${orderId}`, createOrderResp);
           continue;
         }
+
+        console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
+        await DB.orders.update(
+          { isPosted: true, orderErrors: null },
+          { where: { orderId: orderId } }
+        );
+        console.log(`🔄 Updated order ${orderId} → isPosted = true`);
       }
 
-      let shopifyCustomer = await getCustomerByEmail(buyerEmail);
+      job.attrs.data.lastNextToken = newNextToken;
+      job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
+      await job.save();
 
-      if (!shopifyCustomer) {
-        const newCustomerPayload = {
-          email: buyerEmail,
-          phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
-          firstName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[0] || "Amazon",
-          lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
-          addresses: [address],
-          taxExempt: false,
-          ...(amazonOrder?.BuyerInfo?.BuyerPhone
-            ? {
-              smsMarketingConsent: {
-                marketingState: "NOT_SUBSCRIBED",
-                marketingOptInLevel: "SINGLE_OPT_IN",
-              },
-            }
-            : {}),
-        };
+      // if (pageCount === 4) {
+      //   console.log("🚀 ~ pageCount: breaking");
+      //   // Do something specific for page 4
+      //   break;
+      // }
 
-        shopifyCustomer = await createCustomer(newCustomerPayload);
-        if (shopifyCustomer?.success) {
-          shopifyCustomer = shopifyCustomer.customer;
-          console.log(`✅ Created new Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-        } else {
-          console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
-        }
+      if (!newNextToken) break;
+      nextToken = newNextToken;
 
-      } else {
-        if (Array.isArray(shopifyCustomer?.edges)) {
-          shopifyCustomer = shopifyCustomer?.edges[0]?.node;
-        }
-        console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-      }
-
-      const customerId = shopifyCustomer?.id;
-      const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
-
-      const createOrderResp = await createShopifyOrder({
-        customerId,
-        lineItems: shopifyLineItems,
-        shippingAddress: shippingAddressForOrder,
-        amazonOrderId: orderId,
-      });
-
-      if (!createOrderResp.success) {
-        console.error("❌ Failed to create Shopify order for Amazon order", orderId, createOrderResp);
-        return { success: false, error: createOrderResp.error || createOrderResp.errors, orderId };
-      }
-
-      console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp.order.id}`);
+      await sleep(3);
     }
+
+    console.log("✅ All pages processed successfully.");
 
     job.attrs.state = JOB_STATES.COMPLETED;
     job.attrs.lockedAt = null;

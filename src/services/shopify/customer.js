@@ -45,8 +45,6 @@ const getCustomerByEmail = async (email) => {
       }
     );
    
-    console.log("🚀 ~ getCustomerByEmail ~ response:", JSON.stringify(response?.data?.customers, null, 2));
-
     const customer = response?.data?.customers?.edges?.[0]?.node || null;
 
     if (customer) {
@@ -107,7 +105,6 @@ const createCustomer = async (input) => {
       }
     );
 
-    console.log("🚀 ~ createCustomer ~ response?.data:", response?.data)
     const { userErrors, customer } = response?.data?.customerCreate || {};
 
     if (userErrors && userErrors.length > 0) {
