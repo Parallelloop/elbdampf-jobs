@@ -1,5 +1,5 @@
-import getSpAPIClient from "./client";
-import getRDTNtoken from "./get-RDTN";
+import getSpAPIClient from "../client";
+import getRDTNtoken from "../get-RDTN";
 
 const fetchAmazonFBMOrders = async (lastUpdatedAfter = '2025-11-01T12:10:02') => {
   try {

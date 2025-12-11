@@ -3,10 +3,9 @@ import DB from "../../database";
 import Orders from "../../database/models/orders";
 import { sleep } from "../../helper/helper";
 import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
-import GetGrapqlClient from "../../services/shopify/graphql-client";
 import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
-import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/order";
+import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
 import { JOB_STATES } from "../../utils/constants";
 import { clean } from "../../utils/generators";
 
@@ -34,6 +33,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       for (const amazonOrder of amazonOrders) {
         const shopifyLineItems = [];
         const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
+        const asin = amazonOrder?.ASIN || null;
         const orderId = amazonOrder?.AmazonOrderId;
         const shipping = amazonOrder?.ShippingAddress || {};
         const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
