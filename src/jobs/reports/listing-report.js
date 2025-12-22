@@ -6,6 +6,7 @@ import { JOB_STATES } from "../../utils/constants";
 import { downloadDocument, getReport, getReportDocument, getReportId } from "../../services/sp-api";
 import { parseTSV } from "../../utils/parse";
 import getListingsItem from "../../services/sp-api/listings/get-listings-item";
+import { normalizeListingItem } from "../../utils/generators";
 
 const bulkSaveSequelize = async (data) => {
     try {
@@ -79,43 +80,41 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                         // console.log("🚀 ~ reportJson:", JSON.stringify(reportJson, null, 2));
                         const existingProducts = await DB.products.findAll({
                             where: {
-                                sku: reportJson.map(item => item.sellerSku || item.SKU)
+                                sku: reportJson.map(item => item.handlerSku || item.sellerSku || item.SKU)
                             },
                             attributes: ["sku"],
                         });
 
                         const existingSkus = new Set(existingProducts.map(p => p.sku));
+                        console.log("🚀 ~ existingSkus:", existingSkus)
 
                         const data = [];
-                        for (let item of reportJson) {
-                            const sku = item.sellerSku || item.SKU;
+                        for (let rawItem of reportJson) {
+                            console.log("🚀 ~ item:", JSON.stringify(rawItem, null, 2));
+                            const { sku, status, title, asin, fulfillmentChannel, quantity } = normalizeListingItem(rawItem);
                             if (existingSkus.has(sku)) continue;
                             console.log("🚀 ~ sku:", sku)
-                            const asin = item.asin1 || item.ASIN1;
-                            const title = item.itemName || item.ProductName || "";
-                            const statusItem = item.status || "Unknown";
-                            const inventoryQty = Number(item.quantity || item.Quantity || 0);
+                            const fulfillmentType = fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
 
                             const listingInfo = await getListingsItem({ client, sku });
                             // console.log("🚀 ~ listingInfo:", JSON.stringify(listingInfo, null, 2));
                             let image = "";
                             const summary = listingInfo.summaries?.[0] || {};
-                            const fulfillmentType = item.fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
                             image = summary.mainImage?.link || "";
 
                             data.push({
-                                status: statusItem,
+                                status,
                                 image,
                                 title,
                                 sku,
                                 asin,
-                                inventory: inventoryQty,
+                                inventory: quantity,
                                 shippingMethod: fulfillmentType,
                             });
                         }
                         await bulkSaveSequelize(data);
-                        // job.attrs.data.reportId = null;
-                        // await job.save();
+                        job.attrs.data.reportId = null;
+                        await job.save();
                     } else {
                         console.log("🚀 ~ Error => Download Report Document");
                     }

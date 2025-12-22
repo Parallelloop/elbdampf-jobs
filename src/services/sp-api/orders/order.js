@@ -37,7 +37,7 @@ const fetchAmazonFBMOrdersPage = async ({ nextToken, lastUpdatedAfter }) => {
         MarketplaceIds: ['A1PA6795UKMFR9'],
         LastUpdatedAfter: lastUpdatedAfter,
         FulfillmentChannels: ['MFN'],
-        MaxResultsPerPage: 1,
+        MaxResultsPerPage: 100,
       };
     }
   

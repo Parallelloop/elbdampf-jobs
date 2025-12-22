@@ -3,7 +3,7 @@ import GetGrapqlClient from "./graphql-client";
 const createShopifyOrder = async (orderData) => {
   try {
     const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
-    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLine } = orderData;
+    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLines } = orderData;
 
     const mutation = `
           mutation orderCreate(
@@ -65,7 +65,7 @@ const createShopifyOrder = async (orderData) => {
           { key: "ShipServiceLevel", value: "Priority" },
           { key: "Notice", value: "This marketplace order has been imported automatically by our Custom app." },
         ],
-        shippingLines: shippingLine ? [shippingLine] : [],
+        shippingLines: shippingLines || [],
       },
       transactions: [
         {
@@ -87,6 +87,7 @@ const createShopifyOrder = async (orderData) => {
 
     const { userErrors, order } = response?.data?.orderCreate || {};
     if (userErrors && userErrors.length > 0) {
+      console.log("🚀 ~ createShopifyOrder ~ userErrors:", userErrors)
       return { success: false, errors: userErrors };
     }
 

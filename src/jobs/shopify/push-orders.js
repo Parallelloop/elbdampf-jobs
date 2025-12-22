@@ -7,11 +7,12 @@ import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/or
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
 import { JOB_STATES } from "../../utils/constants";
-import { clean } from "../../utils/generators";
+import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
+
 
 Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000 }, async (job, done) => {
   console.log("*********************************************************");
-  console.log("*****************   Push Orders Shofiy Job    *******************");
+  console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
     const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || "2025-11-24T12:10:02";
@@ -33,7 +34,6 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       for (const amazonOrder of amazonOrders) {
         const shopifyLineItems = [];
         const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
-        const asin = amazonOrder?.ASIN || null;
         const orderId = amazonOrder?.AmazonOrderId;
         const shipping = amazonOrder?.ShippingAddress || {};
         const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
@@ -49,6 +49,11 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           phone: clean(shipping?.Phone) || clean(amazonOrder?.BuyerInfo?.BuyerPhone) || "",
         };
         console.log("Processing Amazon order:", orderId);
+
+        // if(orderId !== "303-8543379-1405916") {
+        //   continue;
+        // }
+        // console.log("🚀 ~ Found specific order:", amazonOrder);
 
         if (!buyerEmail) {
           console.log(`⚠️ Skipping order ${orderId} — no buyer email`);
@@ -83,17 +88,32 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
 
         const amazonItemsResp = await fetchAmazonOrderItems(orderId);
         const amazonOrderItems = amazonItemsResp?.OrderItems || [];
-        console.log("🚀 ~ amazonOrderItems:", JSON.stringify(amazonOrderItems, null, 2));
         let subtotal = 0;
         let taxTotal = 0;
+        let deliveryMethodTag = null;
+        let skipOrder = false;
         for (const item of amazonOrderItems) {
           const itemTax = parseFloat(item?.ItemTax?.Amount || 0);
           const sku = item?.SellerSKU;
+          const asin = item?.ASIN || null;
+          console.log("🚀 ~ sku:", sku);
+          console.log("🚀 ~ asin:", asin);
+          const productRecord = await DB.products.findOne({
+            where: { asin },
+            include: [{ model: DB.deliveryMethod, as: "deliveryMethod" }]
+          });
+
+          const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
+          deliveryMethodTag = pickHigherPriority(
+            deliveryMethodTag,
+            tagFromProduct
+          );
           const qty = item?.QuantityOrdered || 1;
           const variantResult = await findVariantProduct({ query: sku });
           if (!variantResult.success || variantResult.variants.length === 0) {
-            console.warn(`⚠️ ⚠️ ⚠️ No variant found for SKU: ${sku} ⚠️ ⚠️ ⚠️`);
-            continue;
+            console.warn(`❌ SKU not found on Shopify. Skipping entire order ${orderId}. SKU: ${sku}`);
+            skipOrder = true;
+            break; // stop processing items
           }
           const price = parseFloat(item?.ItemPrice?.Amount || variant?.price || 0);
           const variant = variantResult.variants[0];
@@ -136,9 +156,42 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           }
         }
 
+        if (skipOrder) {
+          await DB.orders.update(
+            {
+              orderErrors: "One or more products not found on Shopify",
+            },
+            { where: { orderId } }
+          );
+
+          console.log(`⏭️ Order ${orderId} skipped — product not available on Shopify`);
+          continue; // move to next Amazon order
+        }
+
+        let selectedDeliveryMethod = null;
+        const finalTag = deliveryMethodTag || "standard";
+        console.log("🚀 ~ finalTag:", finalTag)
+
+        selectedDeliveryMethod = mapDeliveryMethodToShopify(finalTag);
+        const shippingLines = selectedDeliveryMethod
+          ? [
+            {
+              title: selectedDeliveryMethod.title,
+              code: selectedDeliveryMethod.code,
+              priceSet: {
+                shopMoney: {
+                  amount: selectedDeliveryMethod.price,
+                  currencyCode: "EUR",
+                },
+              },
+            },
+          ]
+          : [];
         const totalAmount = subtotal + taxTotal;
 
         let shopifyCustomer = await getCustomerByEmail(buyerEmail);
+        await sleep(5); // 5 seconds
+        
         if (!shopifyCustomer) {
           const newCustomerPayload = {
             email: buyerEmail,
@@ -164,7 +217,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           } else {
             console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
           }
-
+          await sleep(5); // 5 seconds
         } else {
           if (Array.isArray(shopifyCustomer?.edges)) {
             shopifyCustomer = shopifyCustomer?.edges[0]?.node;
@@ -176,20 +229,40 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         const createOrderResp = await createShopifyOrder({
           buyerEmail,
           totalAmount,
-          shippingLine: null,
           lineItems: shopifyLineItems,
+          shippingLines,
           shippingAddress: shippingAddressForOrder,
           amazonOrderId: orderId,
         });
 
-        if (!createOrderResp.success) {
-          await DB.Orders.update({
-            orderErrors: createOrderResp.error || createOrderResp.errors || "Unknown Shopify error"
-          },
-            { where: { orderId: orderId } }
+        await sleep(5); // 5 seconds
+
+        if (
+          !createOrderResp?.success ||
+          createOrderResp?.errors?.length
+        ) {
+          const errorMessage =
+            createOrderResp?.errors
+              ?.map(e => e.message)
+              .join(", ") ||
+            createOrderResp?.error ||
+            "Unknown Shopify error";
+
+          await DB.orders.update(
+            { orderErrors: errorMessage },
+            { where: { orderId } }
           );
 
-          console.error(`❌ Failed Shopify order for Amazon ${orderId}`, createOrderResp);
+          console.error(
+            `❌ Shopify order failed for Amazon ${orderId}:`,
+            errorMessage
+          );
+
+          continue; // DO NOT touch order.id
+        }
+
+        if (!createOrderResp?.order?.id) {
+          console.warn(`⚠️ Shopify order response missing order ID for Amazon ${orderId}`);
           continue;
         }
 
@@ -205,16 +278,16 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
       await job.save();
 
-      if (pageCount === 4) {
-        console.log("🚀 ~ pageCount: breaking");
-        // Do something specific for page 4
-        break;
-      }
+      // if (pageCount === 4) {
+      //   console.log("🚀 ~ pageCount: breaking");
+      //   // Do something specific for page 4
+      //   break;
+      // }
 
       if (!newNextToken) break;
       nextToken = newNextToken;
 
-      await sleep(3);
+      await sleep(5); // 5 seconds between page
     }
 
     console.log("✅ All pages processed successfully.");

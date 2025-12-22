@@ -25,10 +25,21 @@ const Products = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       defaultValue: "Unknown",
     },
+    deliveryMethodId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: {
+        model: "delivery_methods",
+        key: "id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "SET NULL",
+    },
   });
 
   Product.associate = (models) => {
     Product.hasOne(models.inventories, { foreignKey: "productId" });
+    Product.belongsTo(models.deliveryMethod, { foreignKey: "deliveryMethodId", as: "deliveryMethod" });
   };
 
   return Product;
