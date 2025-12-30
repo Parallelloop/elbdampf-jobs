@@ -15,7 +15,8 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
-    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || "2025-12-24T12:10:02";
+    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || "2025-12-29T12:10:02";
+    console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
     while (true) {

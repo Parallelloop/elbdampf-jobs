@@ -1,5 +1,6 @@
 import DB from "../database";
 import { confirmShipmentPayloadHelper } from "../helper/helper";
+import { getShopifyOrder } from "../services/shopify/order";
 import { fetchAmazonOrderItems } from "../services/sp-api/orders/order";
 import confirmOrderShipment from "../services/sp-api/orders/updating-confrim-shipment";
 
@@ -7,25 +8,25 @@ import confirmOrderShipment from "../services/sp-api/orders/updating-confrim-shi
 /**
  * Update confirm shipment status after Amazon response
  */
-const updateConfirmShipment = async (orderId, isSuccess, errors = null) => {
-    try {
-        const updateData = isSuccess
-            ? {
-                isPosted: true,
-                confirmShipmentErrors: null,
-            }
-            : {
-                confirmShipmentErrors: errors || null,
-            };
+const updateConfirmShipment = async (amazonOrderId, isSuccess, errors = null) => {
+  try {
+    const updateData = isSuccess
+      ? {
+        isPosted: true,
+        confirmShipmentErrors: null,
+      }
+      : {
+        confirmShipmentErrors: errors || null,
+      };
 
-        await DB.confirmShipment.update(updateData, {
-            where: { orderId },
-        });
+    await DB.confirmShipment.update(updateData, {
+      where: { orderId: amazonOrderId },
+    });
 
-        console.log(`ConfirmShipment updated for orderId: ${orderId}`);
-    } catch (error) {
-        console.error(`Failed to update ConfirmShipment ${orderId}:`, error);
-    }
+    console.log(`ConfirmShipment updated for amazonOrderId: ${amazonOrderId}`);
+  } catch (error) {
+    console.error(`Failed to update ConfirmShipment ${amazonOrderId}:`, error);
+  }
 };
 
 /**
@@ -35,21 +36,17 @@ const handleFulfillmentWebhook = async (req, res) => {
   try {
     console.log("🚀 ~ handleFulfillmentWebhook ~ req:", JSON.stringify(req.body, null, 2));
 
-     return res.json({
-      success: true,
-      message: "Fulfillment status updated successfully.",
-    });
-
     const {
       tracking_company: carrierCode,
       tracking_company: carrierName,
       tracking_number: trackingNumber,
       updated_at: shipDate,
-      order_id: orderId,
+      order_id,
     } = req.body;
 
+    const shopifyOrderId = String(order_id);
     if (
-      !orderId ||
+      !shopifyOrderId ||
       !carrierCode ||
       !carrierName ||
       !trackingNumber ||
@@ -65,13 +62,32 @@ const handleFulfillmentWebhook = async (req, res) => {
       return res.status(200).send("No tracking");
     }
 
+    // Fetch Shopify order
+    const orderResult = await getShopifyOrder(shopifyOrderId);
+    if (!orderResult.success || !orderResult.amazonOrderId) {
+      console.log("⚠️ Amazon Order ID not found");
+      return res.status(400).json({
+        success: false,
+        message: "Amazon Order ID not found",
+      });
+    }
+
+    const amazonOrderId = orderResult.amazonOrderId;
+
     // Already shipped?
     const shipped = await DB.confirmShipment.findOne({
-      where: { orderId, isPosted: true },
-      include: [{ model: DB.packageDetail, where: { trackingNumber }, required: false }],
+      where: { orderId: amazonOrderId, isPosted: true },
+      include: [
+        {
+          model: DB.packageDetail,
+          as: "packages",
+          where: { trackingNumber },
+          required: false // LEFT JOIN
+        }
+      ]
     });
 
-    if (shipped) {
+    if (shipped && shipped?.packages && shipped?.packages?.length > 0) {
       console.log("🚫 Already shipped to Amazon");
       return res.status(200).json({
         success: true,
@@ -82,8 +98,7 @@ const handleFulfillmentWebhook = async (req, res) => {
     const packageReferenceId = Math.floor(Math.random() * 1_000_000_000).toString();
 
     // Fetch Amazon order items
-    const itemsData = await fetchAmazonOrderItems(orderId);
-    console.log("🚀 ~ updatingConfirmShipment ~ itemsData:", itemsData)
+    const itemsData = await fetchAmazonOrderItems(amazonOrderId);
 
     if (!itemsData?.OrderItems?.length) {
       return res.status(400).json({
@@ -96,7 +111,6 @@ const handleFulfillmentWebhook = async (req, res) => {
       orderItemId: item.OrderItemId,
       quantity: item.QuantityOrdered,
     }));
-    console.log("🚀 ~ updatingConfirmShipment ~ orderitemsForPayload:", orderitemsForPayload)
 
     // Prepare package detail
     const packageDetail = {
@@ -106,12 +120,11 @@ const handleFulfillmentWebhook = async (req, res) => {
       trackingNumber,
       shipDate: new Date(shipDate),
     };
-    console.log("🚀 ~ updatingConfirmShipment ~ packageDetail:", packageDetail)
 
     // Upsert confirm shipment
     const [shipment] = await DB.confirmShipment.upsert(
       {
-        orderId,
+        orderId: amazonOrderId,
         marketplaceId: "A1PA6795UKMFR9",
         isPosted: false,
       },
@@ -135,11 +148,11 @@ const handleFulfillmentWebhook = async (req, res) => {
       packageDetail
     );
 
-    console.log("🚀 ConfirmShipment Payload:", payload);
+    console.log("🚀 ConfirmShipment Payload:", JSON.stringify(payload, null, 2));
 
     // Send shipment confirmation to Amazon
     const responseShipment = await confirmOrderShipment({
-      orderId,
+      orderId: amazonOrderId,
       body: payload,
     });
 
@@ -147,16 +160,15 @@ const handleFulfillmentWebhook = async (req, res) => {
 
     // Handle Amazon response
     if (responseShipment?.success === true) {
-      await updateConfirmShipment(orderId, true);
-
+      await updateConfirmShipment(amazonOrderId, true);
       // Mark order as shipped
       await DB.orders.update(
         { orderStatus: "Shipped" },
-        { where: { orderId } }
+        { where: { orderId: amazonOrderId } }
       );
     } else {
       await updateConfirmShipment(
-        orderId,
+        amazonOrderId,
         false,
         JSON.stringify(responseShipment?.errors)
       );

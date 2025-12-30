@@ -160,7 +160,63 @@ const checkShopifyOrder = async (amazonOrderId, email) => {
   }
 };
 
+const getShopifyOrder = async (shopifyOrderId) => {
+  try {
+    if (!shopifyOrderId) {
+      return { success: false, error: "No Shopify Order ID provided" };
+    }
+
+    const graphClient = GetGrapqlClient({ scopes: ["read_orders"] });
+
+    const query = `
+      query getOrder($id: ID!) {
+        order(id: $id) {
+          id
+          name
+          note
+          customAttributes {
+            key
+            value
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      id: `gid://shopify/Order/${shopifyOrderId}`,
+    };
+
+    const response = await graphClient.request(query, { variables });
+    const order = response?.data?.order;
+    if (!order) {
+      return { success: false, error: "Order not found" };
+    }
+
+    const amazonOrderId =
+      order.customAttributes?.find(
+        (attr) => attr.key === "Amazon Order ID"
+      )?.value ||
+      // fallback to note
+      order.note?.match(/\d{3}-\d{7}-\d{7}/)?.[0] ||
+      null;
+
+    console.log("✅ Amazon Order ID:", amazonOrderId);
+
+    return {
+      success: true,
+      shopifyOrderId,
+      amazonOrderId,
+      order,
+    };
+  } catch (error) {
+    console.error("❌ getShopifyOrder failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+
 export {
   createShopifyOrder,
-  checkShopifyOrder
+  checkShopifyOrder,
+  getShopifyOrder
 }
