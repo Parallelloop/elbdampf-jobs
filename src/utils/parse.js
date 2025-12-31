@@ -21,7 +21,8 @@ const genericParser = (objValue, objKey) => {
   let value = unescape(objValue);
 
   const lowerCaseKey = objKey.toLowerCase();
-  const ignore = TSV_IGNORE_FIELDS.indexOf(lowerCaseKey) > -1;
+  const ignore = -1;
+  // const ignore = TSV_IGNORE_FIELDS.indexOf(lowerCaseKey) > -1;
   if (!ignore) {
     const isInt = (str) => /^(\-|\+)?([1-9]+[0-9]*)$/.test(str);
     const isFloat = (v) => v - parseFloat(v) + 1 >= 0;

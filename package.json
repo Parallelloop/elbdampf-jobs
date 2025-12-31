@@ -5,12 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon --exec babel-node index.js",
-    "setup": "mup setup --config=./deploy/mup.js",
+    "setup": "mup setup --config=./deploy/mup.js --verbose",
     "build": "rm -rf dist && webpack --config webpack.babel.js --progress",
     "dev:logs": "mup logs --config=./deploy/mup.js --tail 5000 -f",
-    "mup:postinstall": "npm install && rm -rf dist && webpack --config ./webpack.babel.js --progress",
+    "mup:postinstall": "npm install --legacy-peer-deps && rm -rf dist && webpack --config ./webpack.babel.js --progress",
     "prod:start": "node ./dist/index.js",
-    "deploy": "npm run build && mup deploy --config=./deploy/mup.js",
+    "deploy": "npm run build && mup deploy --config=./deploy/mup.js --verbose",
     "reconfig": "mup reconfig --config=./deploy/mup.js"
   },
   "author": "",
