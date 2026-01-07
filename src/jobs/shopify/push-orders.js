@@ -39,7 +39,8 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       pageCount++;
       console.log(`📦 Processing page #${pageCount} — Orders: ${amazonOrders.length}`);
 
-      for (const amazonOrder of amazonOrders) {
+      for (let i = 0; i < amazonOrders.length; i++) {
+        const amazonOrder = amazonOrders[i];
         const shopifyLineItems = [];
         const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
         const orderId = amazonOrder?.AmazonOrderId;
@@ -101,7 +102,9 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         let taxTotal = 0;
         let deliveryMethodTag = null;
         let skipOrder = false;
-        for (const item of amazonOrderItems) {
+        for (let j = 0; j < amazonOrderItems.length; j++) {
+          const item = amazonOrderItems[j];
+
           const sku = item?.SellerSKU;
           const asin = item?.ASIN || null;
           console.log("🚀 ~ sku:", sku);
