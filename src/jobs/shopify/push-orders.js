@@ -1,12 +1,12 @@
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
 import Orders from "../../database/models/orders";
-import { sleep } from "../../helper/helper";
+import { getCustomerMetafield, sleep } from "../../helper/helper";
 import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
 import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
-import { JOB_STATES } from "../../utils/constants";
+import { DELIVERY_KEY, DELIVERY_NAMESPACE, JOB_STATES } from "../../utils/constants";
 import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
 
 
@@ -103,6 +103,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             where: { asin },
             include: [{ model: DB.deliveryMethod, as: "deliveryMethod" }]
           });
+          console.log("🚀 ~ productRecord:", JSON.stringify(productRecord, null, 2));
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
           deliveryMethodTag = pickHigherPriority(
@@ -170,10 +171,67 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         }
 
         let selectedDeliveryMethod = null;
-        const finalTag = deliveryMethodTag || "standard";
-        console.log("🚀 ~ finalTag:", finalTag)
+        let finalDeliveryMethod = "STANDARD";
 
-        selectedDeliveryMethod = mapDeliveryMethodToShopify(finalTag);
+        let shopifyCustomer = await getCustomerByEmail(buyerEmail);
+        await sleep(5); // 5 seconds
+        if (!shopifyCustomer) {
+          finalDeliveryMethod = deliveryMethodTag || "STANDARD";
+          const newCustomerPayload = {
+            email: buyerEmail,
+            phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
+            firstName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[0] || "Amazon",
+            lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
+            addresses: [address],
+            taxExempt: false,
+            metafields: [
+              {
+                namespace: DELIVERY_NAMESPACE,
+                key: DELIVERY_KEY,
+                type: "json",
+                value: JSON.stringify([finalDeliveryMethod])
+              }
+            ],
+            ...(amazonOrder?.BuyerInfo?.BuyerPhone
+              ? {
+                smsMarketingConsent: {
+                  marketingState: "NOT_SUBSCRIBED",
+                  marketingOptInLevel: "SINGLE_OPT_IN",
+                },
+              }
+              : {}),
+          };
+          shopifyCustomer = await createCustomer(newCustomerPayload);
+          if (shopifyCustomer?.success) {
+            shopifyCustomer = shopifyCustomer.customer;
+            console.log(`✅ Created new Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
+          } else {
+            console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
+          }
+          await sleep(5); // 5 seconds
+        } else {
+          if (Array.isArray(shopifyCustomer?.edges)) {
+            shopifyCustomer = shopifyCustomer?.edges[0]?.node;
+          }
+
+          console.log("🚀 ~ shopifyCustomer: here", JSON.stringify(shopifyCustomer, null, 2));
+          let deliveryMetafield = getCustomerMetafield(
+            shopifyCustomer,
+            DELIVERY_NAMESPACE,
+            DELIVERY_KEY
+          );
+
+          if (deliveryMetafield?.value) {
+              const parsed = JSON.parse(deliveryMetafield.value);
+              finalDeliveryMethod = parsed?.[0] || "STANDARD";
+          }
+          console.log("✅ Using existing delivery method:", finalDeliveryMethod);
+          console.log("🚀 ~ deliveryMetafield:", deliveryMetafield);
+          console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
+        }
+        const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
+
+        selectedDeliveryMethod = mapDeliveryMethodToShopify(finalDeliveryMethod);
         const shippingLines = selectedDeliveryMethod
           ? [
             {
@@ -189,43 +247,6 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           ]
           : [];
         const totalAmount = subtotal + taxTotal;
-
-        let shopifyCustomer = await getCustomerByEmail(buyerEmail);
-        await sleep(5); // 5 seconds
-        
-        if (!shopifyCustomer) {
-          const newCustomerPayload = {
-            email: buyerEmail,
-            phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
-            firstName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[0] || "Amazon",
-            lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
-            addresses: [address],
-            taxExempt: false,
-            ...(amazonOrder?.BuyerInfo?.BuyerPhone
-              ? {
-                smsMarketingConsent: {
-                  marketingState: "NOT_SUBSCRIBED",
-                  marketingOptInLevel: "SINGLE_OPT_IN",
-                },
-              }
-              : {}),
-          };
-
-          shopifyCustomer = await createCustomer(newCustomerPayload);
-          if (shopifyCustomer?.success) {
-            shopifyCustomer = shopifyCustomer.customer;
-            console.log(`✅ Created new Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-          } else {
-            console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
-          }
-          await sleep(5); // 5 seconds
-        } else {
-          if (Array.isArray(shopifyCustomer?.edges)) {
-            shopifyCustomer = shopifyCustomer?.edges[0]?.node;
-          }
-          console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-        }
-        const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
 
         const createOrderResp = await createShopifyOrder({
           buyerEmail,
@@ -278,12 +299,6 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       job.attrs.data.lastNextToken = newNextToken;
       job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
       await job.save();
-
-      // if (pageCount === 4) {
-      //   console.log("🚀 ~ pageCount: breaking");
-      //   // Do something specific for page 4
-      //   break;
-      // }
 
       if (!newNextToken) break;
       nextToken = newNextToken;

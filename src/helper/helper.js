@@ -14,7 +14,16 @@ const confirmShipmentPayloadHelper = (orderItems, packageDetail) => {
   return body;
 };
 
+const getCustomerMetafield = (customer, namespace, key) => {
+  const edges = customer?.metafields?.edges || [];
+  const field = edges.find(
+    (e) => e.node.namespace === namespace && e.node.key === key
+  );
+  return field ? field.node : null;
+}
+
 export {
     sleep,
-    confirmShipmentPayloadHelper
+    confirmShipmentPayloadHelper,
+    getCustomerMetafield
 }
