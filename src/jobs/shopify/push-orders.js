@@ -142,7 +142,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             taxLines:  [
               {
                 title: "VAT",
-                rate: 19,
+                rate: 0.19,
                 priceSet: {
                   shopMoney: {
                     amount: (unitPrice + unitPrice * 0.19).toFixed(2),
