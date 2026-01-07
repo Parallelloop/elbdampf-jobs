@@ -227,6 +227,20 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         }
         const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
 
+        // 🔍 Check if Shopify order already exists for this Amazon Order
+        const existingOrderCheck = await checkShopifyOrder(orderId, buyerEmail);
+
+        if (existingOrderCheck?.success && existingOrderCheck?.edges?.length > 0) {
+          console.log(`⏩ Shopify order already exists for Amazon order ${orderId}. Skipping import.`);
+
+          await DB.orders.update(
+            { isPosted: true, orderErrors: null },
+            { where: { orderId } }
+          );
+
+          continue;
+        }
+
         const createOrderResp = await createShopifyOrder({
           buyerEmail,
           totalAmount,
