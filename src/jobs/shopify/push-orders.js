@@ -23,6 +23,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     } else {
       lastUpdatedAfter = moment().subtract(1, 'day').toISOString();
     }
+    const currentTime = moment();
+    
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
@@ -301,8 +303,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         console.log(`🔄 Updated order ${orderId} → isPosted = true`);
       }
 
-      job.attrs.data.lastNextToken = newNextToken;
-      job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
+      job.attrs.data.lastUpdatedAfter = currentTime;
       await job.save();
 
       if (!newNextToken) break;
