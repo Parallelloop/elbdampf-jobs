@@ -19,7 +19,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
 
     let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
     if(lastUpdatedAfter){
-      lastUpdatedAfter = moment(lastUpdatedAfter).subtract(5, 'minutes').toISOString();
+      lastUpdatedAfter = moment(lastUpdatedAfter).subtract(15, 'minutes').toISOString();
     } else {
       lastUpdatedAfter = moment().subtract(1, 'day').toISOString();
     }
@@ -102,7 +102,6 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         let deliveryMethodTag = null;
         let skipOrder = false;
         for (const item of amazonOrderItems) {
-          const itemTax = parseFloat(item?.ItemTax?.Amount || 0);
           const sku = item?.SellerSKU;
           const asin = item?.ASIN || null;
           console.log("🚀 ~ sku:", sku);
@@ -115,45 +114,43 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
           deliveryMethodTag = tagFromProduct;
           const qty = item?.QuantityOrdered || 1;
+
           const variantResult = await findVariantProduct({ query: sku });
           if (!variantResult.success || variantResult.variants.length === 0) {
             console.warn(`❌ SKU not found on Shopify. Skipping entire order ${orderId}. SKU: ${sku}`);
             skipOrder = true;
             break; // stop processing items
           }
-          const price = parseFloat(item?.ItemPrice?.Amount || variant?.price || 0);
+          const totalItemPrice = parseFloat(item?.ItemPrice?.Amount || 0);
           const variant = variantResult.variants[0];
-          subtotal += price * qty;
-          taxTotal += itemTax;
+          const unitPrice = qty > 0 ? totalItemPrice / qty : 0;
+          subtotal += totalItemPrice;
 
           shopifyLineItems.push({
             variantId: variant.id,
-            variantTitle: variant.title || "Variant Item",
+            variantTitle: item.Title || variant.title || "Variant Item",
             quantity: qty,
-            title: item.Title || "Product Item",
+            title: item.Title || variant.title || "Product Item",
             requiresShipping: true,
             priceSet: {
               shopMoney: {
-                amount: price,
+                amount: unitPrice.toFixed(2),
                 currencyCode: item.ItemPrice?.CurrencyCode || "EUR"
               }
             },
             sku: sku,
-            taxLines: itemTax ? [
+            taxLines:  [
               {
                 title: "VAT",
-                rate:
-                  parseFloat(itemTax) /
-                  parseFloat(price || 1),
+                rate: 19,
                 priceSet: {
                   shopMoney: {
-                    amount: parseFloat(itemTax),
+                    amount: (unitPrice + unitPrice * 0.19).toFixed(2),
                     currencyCode: item?.ItemTax?.CurrencyCode
                   }
                 }
               }
             ]
-              : []
           });
 
           if (shopifyLineItems.length === 0) {
