@@ -3,7 +3,7 @@ import GetGrapqlClient from "./graphql-client";
 const createShopifyOrder = async (orderData) => {
   try {
     const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
-    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLines } = orderData;
+    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLines, processedAt } = orderData;
 
     const mutation = `
           mutation orderCreate(
@@ -57,6 +57,7 @@ const createShopifyOrder = async (orderData) => {
         shippingAddress: shippingAddress || null,
         billingAddress: shippingAddress || null,
         note: `Imported from Amazon Order ID: ${amazonOrderId}`,
+        processedAt: processedAt,
         financialStatus: "PAID",
         tags: [`Amazon`],
         customAttributes: [

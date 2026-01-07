@@ -15,7 +15,13 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
-    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+
+    let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
+    if(lastUpdatedAfter){
+      lastUpdatedAfter = moment(lastUpdatedAfter).subtract(5, 'minutes').toISOString();
+    } else {
+      lastUpdatedAfter = moment(lastUpdatedAfter).subtract(1, 'day').toISOString();
+    }
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
@@ -36,6 +42,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         const shopifyLineItems = [];
         const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
         const orderId = amazonOrder?.AmazonOrderId;
+        const processedAt = amazonOrder?.PurchaseDate;
         const shipping = amazonOrder?.ShippingAddress || {};
         const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
         const fullName = clean(shipping?.Name) || "";
@@ -105,10 +112,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           });
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
-          deliveryMethodTag = pickHigherPriority(
-            deliveryMethodTag,
-            tagFromProduct
-          );
+          deliveryMethodTag = tagFromProduct;
           const qty = item?.QuantityOrdered || 1;
           const variantResult = await findVariantProduct({ query: sku });
           if (!variantResult.success || variantResult.variants.length === 0) {
@@ -169,19 +173,17 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           continue; // move to next Amazon order
         }
 
-        let selectedDeliveryMethod = null;
         const finalTag = deliveryMethodTag || "standard";
         console.log("🚀 ~ finalTag:", finalTag)
 
-        selectedDeliveryMethod = mapDeliveryMethodToShopify(finalTag);
-        const shippingLines = selectedDeliveryMethod
+        const shippingLines = finalTag
           ? [
             {
-              title: selectedDeliveryMethod.title,
-              code: selectedDeliveryMethod.code,
+              title: finalTag,
+              code: finalTag,
               priceSet: {
                 shopMoney: {
-                  amount: selectedDeliveryMethod.price,
+                  amount: "0.0",
                   currencyCode: "EUR",
                 },
               },
@@ -244,6 +246,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         const createOrderResp = await createShopifyOrder({
           buyerEmail,
           totalAmount,
+          processedAt,
           lineItems: shopifyLineItems,
           shippingLines,
           shippingAddress: shippingAddressForOrder,
