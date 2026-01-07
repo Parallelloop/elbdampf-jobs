@@ -23,8 +23,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     } else {
       lastUpdatedAfter = moment().subtract(1, 'day').toISOString();
     }
-    const currentTime = moment();
-    
+    const currentTime = new Date();
+
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
