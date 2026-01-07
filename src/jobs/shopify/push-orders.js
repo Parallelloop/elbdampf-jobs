@@ -122,9 +122,15 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             break; // stop processing items
           }
           const totalItemPrice = parseFloat(item?.ItemPrice?.Amount || 0);
+          const taxRate = 0.19;
+
+          const taxAmount = totalItemPrice * (taxRate / (1 + taxRate));
+          const netTotalPrice = totalItemPrice - taxAmount;          
+          
           const variant = variantResult.variants[0];
-          const unitPrice = qty > 0 ? totalItemPrice / qty : 0;
-          subtotal += totalItemPrice;
+          const unitPrice = qty > 0 ? netTotalPrice / qty : 0;
+          subtotal += netTotalPrice;
+          taxTotal += taxAmount;
 
           shopifyLineItems.push({
             variantId: variant.id,
@@ -139,14 +145,14 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
               }
             },
             sku: sku,
-            taxLines:  [
+            taxLines: [
               {
                 title: "VAT",
-                rate: 0.19,
+                rate: taxRate,
                 priceSet: {
                   shopMoney: {
-                    amount: (totalItemPrice * 0.19).toFixed(2),
-                    currencyCode: item?.ItemTax?.CurrencyCode
+                    amount: taxAmount.toFixed(2),
+                    currencyCode: item?.ItemTax?.CurrencyCode || "EUR"
                   }
                 }
               }
