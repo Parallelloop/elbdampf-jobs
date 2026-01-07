@@ -11,7 +11,7 @@ import { JOB_STATES } from "../../utils/constants";
 import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
 
 
-Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000 }, async (job, done) => {
+Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
   console.log("*********************************************************");
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
