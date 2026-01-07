@@ -228,6 +228,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
           }
           await sleep(5); // 5 seconds
+          await job.touch();
         } else {
           if (Array.isArray(shopifyCustomer?.edges)) {
             shopifyCustomer = shopifyCustomer?.edges[0]?.node;
@@ -261,6 +262,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         });
 
         await sleep(5); // 5 seconds
+        await job.touch();
 
         if (
           !createOrderResp?.success ||
@@ -305,6 +307,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
       if (!newNextToken) break;
       nextToken = newNextToken;
+      await job.touch();
 
       await sleep(5); // 5 seconds between page
     }
