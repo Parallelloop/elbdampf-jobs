@@ -52,7 +52,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         const fullName = clean(shipping?.Name) || "";
         const firstName = fullName.split(" ")[0] || "";
         const lastName = fullName.split(" ").slice(1).join(" ") || "";
-        const isResidentialAddress = shipping?.AddressType === "Residential" || shipping?.AddressType === "";
+        const isResidentialAddress = shipping?.AddressType == "Residential" || shipping?.AddressType == null;
 
         const address = {
           address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine1) || "",
