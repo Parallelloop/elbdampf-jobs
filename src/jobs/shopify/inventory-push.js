@@ -2,52 +2,96 @@ import DB from "../../database";
 // import { Op } from "sequelize";
 // import { ceil } from "lodash";
 // import moment from "moment";
-// import { GetClient } from "../services/amazon";
+import GetClient from "../../services/sp-api/client";
+import { createFeedDocument, createFeed, uploadFeedDocument } from "../../services/sp-api/feeds";
 // import { createFeedDocument, createFeed, uploadFeedDocument } from "../services/amazon/feeds";
 // import { mapItemsFeed } from '../utils/generators';
 import { fetchActiveProducts } from "../../services/shopify/product";
 import Agenda from "../../config/agenda-jobs";
 import { JOB_STATES } from "../../utils/constants";
 
-const GetExchangeRate = async (currencyCode) => {
-  const rate = await DB.exchangeRates.findOne({ where: { currencyCode } });
-  if(rate) {
-    return rate.rate;
-  } else {
-    return false;
-  }
+
+const flattenProductsWithVariants = (products) => {
+  return products.flatMap(product => {
+    return product.variants.edges.map(({ node }) => ({
+      productId: product.id,
+      variantId: node.id,
+      title: product.title,
+      status: product.status,
+      sku: node.sku,
+      price: Number(node.price),
+      inventoryQuantity: node.inventoryQuantity
+    }));
+  });
 }
+
+const mapItemsFeed = ({
+  sellerId,
+  marketplaceId,
+  items
+}) => {
+  const messages = [];
+  for (let i = 0; i < items.length; i++) {
+    const {
+      sku,
+      inventoryQuantity,
+    } = items[i];
+    if(!sku) continue;
+    const item = {
+      messageId: i + 1,
+      sku,
+      operationType: "PATCH",
+      productType: "HEALTH_PERSONAL_CARE",
+      patches: [
+        {
+          op: "replace",
+          path: "/attributes/fulfillment_availability",
+          value: [
+              {
+                fulfillment_channel_code: "DEFAULT",
+                quantity: inventoryQuantity,
+            }
+          ]
+        }
+      ]
+    };
+    messages.push(item);
+  }
+  const feed = {
+    header: {
+      sellerId: sellerId,
+      version: "2.0",
+      issueLocale: "en_US",
+    },
+    messages,
+  };
+  return feed;
+};
 
 Agenda.define("inventory-push", { concurrency: 1, lockLifetime: 60 * 60000 }, async (job, done) => {
   console.log('*********************************************************');
   console.log('*****************   Push Amazon Inventory    *******************');
   console.log('*********************************************************');
-  let { userId, storeId, feedId } = job.attrs.data;
+  let { feedId } = job.attrs.data;
 
   try {
     const activeProducts = await fetchActiveProducts();
-      if(activeProducts.length) {
-        for(let i = 0; i < activeProducts.length; i++) {
-          const { marketplaceId, shippingFee, currencyCode, vatTaxPercentage, isActive } = activeProducts[i];
-          console.log("🚀 ~ activeProducts[i]:", JSON.stringify(activeProducts[i], null, 4));
-          // const rate = await GetExchangeRate(currencyCode);
-          // const rate = await GetExchangeRate(currencyCode);
-          // if(rate && vatTaxPercentage > 0) {
-          //   const { feed, itemIds } = mapItemsFeed({ sellerId, currency: currencyCode, rate, marketplaceId, vat: vatTaxPercentage, shipping: shippingFee, isActive, allItems: items });
-          //   if(process.env.NODE_ENV === "production") {
-          //     const client = GetClient({ refresh_token: refreshToken, region });
-          //     const feedDetails = await createFeedDocument({ client, contentType: "application/json; charset=UTF-8" });
-          //     await uploadFeedDocument({ client, feedDetails, feed: { content: JSON.stringify(feed), contentType: "application/json; charset=UTF-8" } });
-          //     const { feedId } = await createFeed({ client, feedType: "JSON_LISTINGS_FEED", feedDocumentId: feedDetails.feedDocumentId, marketplaceId });
-          //     console.log("🚀 ~ feedId ~ ", feedId);
-          //     if(itemIds.length) await DB.itemMarketplaceStatus.update({ status: "ACTIVE" }, { where: { itemId: { [Op.in]: itemIds }, marketplaceId } });
-          //   }
-          // } else {
-          //   console.log("Missing Conversion Rate");
-          // }
-          await job.touch();
-        }
+    console.log("🚀 ~ activeProducts[i]:", JSON.stringify(activeProducts, null, 4));
+    if(activeProducts.length) {
+      const flattenedProducts = flattenProductsWithVariants(activeProducts);
+      console.log("🚀 ~ flattenedProducts:", JSON.stringify(flattenedProducts, null, 4));
+      const feed = mapItemsFeed({ sellerId:  "A2XZLZDZR4H3UG", marketplaceId: "A1PA6795UKMFR9", items: flattenedProducts });
+      console.log("🚀 ~ feed:", JSON.stringify(feed, null, 4))
+      if(process.env.NODE_ENV === "production") {
+        const client = GetClient();
+        const feedDetails = await createFeedDocument({ client, contentType: "application/json; charset=UTF-8" });
+        console.log("🚀 ~ feedDetails:", feedDetails)
+        await uploadFeedDocument({ client, feedDetails, feed: { content: JSON.stringify(feed), contentType: "application/json; charset=UTF-8" } });
+        const { feedId } = await createFeed({ client, feedType: "JSON_LISTINGS_FEED", feedDocumentId: feedDetails.feedDocumentId, marketplaceId:  "A1PA6795UKMFR9" });
+        console.log("🚀 ~ feedId ~ ", feedId);
+        job.attrs.data.lastUpdatedAfter = feedId;
       }
+    }
     job.attrs.state = JOB_STATES.COMPLETED;
     job.attrs.lockedAt = null;
     job.attrs.progress = 100;
@@ -56,14 +100,12 @@ Agenda.define("inventory-push", { concurrency: 1, lockLifetime: 60 * 60000 }, as
     console.log('*****************************************************************');
     console.log('******************     Push Amazon Inventory COMPLETED   *****************');
     console.log('*****************************************************************');
-    // console.log(`userId: ${userId}`);
     console.log('*****************************************************************');
   } catch (error) {
     console.log("🚀 ~ inventory-push.js ~ error", error)
     console.log('*****************************************************************');
     console.log('********************    Push Amazon Inventory RETRY   *******************');
     console.log('*****************************************************************');
-    // console.log(`userId: ${userId}`);
     console.log('*****************************************************************');
 
     job.attrs.state = JOB_STATES.FAILED;
