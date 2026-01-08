@@ -52,9 +52,8 @@ const mapItemsFeed =  async ({
       sku,
       inventoryQuantity,
     } = items[i];
-    if(!sku) continue;
-
     const productType = productTypeMap[sku] || "";
+    if(!sku || !productType) continue;
 
     const item = {
       messageId: i + 1,
