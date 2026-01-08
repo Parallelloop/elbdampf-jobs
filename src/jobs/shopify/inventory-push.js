@@ -25,23 +25,42 @@ const flattenProductsWithVariants = (products) => {
   });
 }
 
-const mapItemsFeed = ({
+const mapItemsFeed =  async ({
   sellerId,
   marketplaceId,
   items
 }) => {
   const messages = [];
+  const skus = items
+    .map(item => item.sku)
+    .filter(Boolean);
+
+  const products = await DB.products.findAll({
+    where: { sku: skus },
+    attributes: ["sku", "productType"],
+  });
+
+  const productTypeMap = {};
+
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i];
+    productTypeMap[product.sku] = product.productType;
+  }
+
   for (let i = 0; i < items.length; i++) {
     const {
       sku,
       inventoryQuantity,
     } = items[i];
     if(!sku) continue;
+
+    const productType = productTypeMap[sku] || "";
+
     const item = {
       messageId: i + 1,
       sku,
       operationType: "PATCH",
-      productType: "HEALTH_PERSONAL_CARE",
+      productType,
       patches: [
         {
           op: "replace",
@@ -80,7 +99,7 @@ Agenda.define("inventory-push", { concurrency: 1, lockLifetime: 60 * 60000 }, as
     if(activeProducts.length) {
       const flattenedProducts = flattenProductsWithVariants(activeProducts);
       console.log("🚀 ~ flattenedProducts:", JSON.stringify(flattenedProducts, null, 4));
-      const feed = mapItemsFeed({ sellerId:  "A2XZLZDZR4H3UG", marketplaceId: "A1PA6795UKMFR9", items: flattenedProducts });
+      const feed = await mapItemsFeed({ sellerId:  "A2XZLZDZR4H3UG", marketplaceId: "A1PA6795UKMFR9", items: flattenedProducts });
       console.log("🚀 ~ feed:", JSON.stringify(feed, null, 4))
       if(process.env.NODE_ENV === "production") {
         const client = GetClient();

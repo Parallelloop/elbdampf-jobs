@@ -101,9 +101,8 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                             // console.log("🚀 ~ listingInfo:", JSON.stringify(listingInfo, null, 2));
                             let image = "";
                             const summary = listingInfo.summaries?.[0] || {};
-                            const productType = listingInfo.productTypes?.[0] || {};
+                            const productType = summary.productType || "";
                             image = summary.mainImage?.link || "";
-                            
 
                             data.push({
                                 status,
@@ -113,7 +112,7 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                                 asin,
                                 inventory: quantity,
                                 shippingMethod: fulfillmentType,
-                                productType: productType.productType || "",
+                                productType,
                             });
                         }
                         await bulkSaveSequelize(data);
