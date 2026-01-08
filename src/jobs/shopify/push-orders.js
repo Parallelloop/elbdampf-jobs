@@ -52,9 +52,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         const fullName = clean(shipping?.Name) || "";
         const firstName = fullName.split(" ")[0] || "";
         const lastName = fullName.split(" ").slice(1).join(" ") || "";
+        const isResidentialAddress = shipping?.AddressType === "Residential";
+
         const address = {
-          address1: clean(shipping?.AddressLine1) || "",
-          address2: clean(shipping?.AddressLine2) || "",
+          address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine2) || "",
+          address2: isResidentialAddress ? clean(shipping?.AddressLine2) || "" : "",
+          company: isResidentialAddress ? "" : clean(shipping?.AddressLine1) || "",
           city: clean(shipping?.City) || clean(addressFrom?.City) || "",
           countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
           zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
