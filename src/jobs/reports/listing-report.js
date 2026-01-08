@@ -22,13 +22,14 @@ const bulkSaveSequelize = async (data) => {
                 title: item.title,
                 image: item.image,
                 status: item.status,
+                productType: item.productType,
                 shippingMethod: item.shippingMethod,
             });
             skuToInventory.set(item.sku, item.inventory);
         }
 
         await DB.products.bulkCreate(productBulk, {
-            updateOnDuplicate: ["asin", "title", "image", "status", "shippingMethod", "updatedAt"],
+            updateOnDuplicate: ["productType", "asin", "title", "image", "status", "shippingMethod", "updatedAt"],
         });
 
         const products = await DB.products.findAll({
@@ -100,7 +101,9 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                             // console.log("🚀 ~ listingInfo:", JSON.stringify(listingInfo, null, 2));
                             let image = "";
                             const summary = listingInfo.summaries?.[0] || {};
+                            const productType = listingInfo.productTypes?.[0] || {};
                             image = summary.mainImage?.link || "";
+                            
 
                             data.push({
                                 status,
@@ -110,6 +113,7 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                                 asin,
                                 inventory: quantity,
                                 shippingMethod: fulfillmentType,
+                                productType: productType.productType || "",
                             });
                         }
                         await bulkSaveSequelize(data);
