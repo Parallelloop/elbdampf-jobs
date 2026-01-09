@@ -50,8 +50,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         const shipping = amazonOrder?.ShippingAddress || {};
         const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
         const fullName = clean(shipping?.Name) || "";
-        const firstName = fullName.split(" ")[0] || "";
-        const lastName = fullName.split(" ").slice(1).join(" ") || "";
+        const firstName = fullName.split(" ")[0] || "No Name";
+        const lastName = fullName.split(" ").slice(1).join(" ") || fullName.split(" ")[0] || "No Name";
         const isResidentialAddress = shipping?.AddressType == "Residential" || false;
         console.log("🚀 ~ isResidentialAddress:", isResidentialAddress)
 
