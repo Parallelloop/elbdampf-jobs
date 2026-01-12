@@ -56,9 +56,9 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         console.log("🚀 ~ isResidentialAddress:", isResidentialAddress)
 
         const address = {
-          address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine2) || "",
+          address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine2) || clean(shipping?.AddressLine1) || "",
           address2: isResidentialAddress ? clean(shipping?.AddressLine2) || "" : "",
-          company: isResidentialAddress ? "" : clean(shipping?.AddressLine1) || "",
+          company: isResidentialAddress ? "" : shipping?.AddressLine2 ? clean(shipping?.AddressLine1) || "" : "",
           city: clean(shipping?.City) || clean(addressFrom?.City) || "",
           countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
           zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
@@ -243,6 +243,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
         }
         const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
+        console.log("🚀 ~ shippingAddressForOrder:", shippingAddressForOrder)
 
         // 🔍 Check if Shopify order already exists for this Amazon Order
         const existingOrderCheck = await checkShopifyOrder(orderId, buyerEmail);
