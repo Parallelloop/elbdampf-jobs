@@ -5,5 +5,6 @@ import inventory from "./Inventory";
 import deliveryMethods from "./delivery-method";
 import confirmShipment from "./ConfirmShipment";
 import packageDetail from "./PackageDetail";
+import settings from "./setting"
 
-export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail };
+export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail, settings };
