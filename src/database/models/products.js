@@ -14,7 +14,7 @@ const Products = (sequelize, DataTypes) => {
       allowNull: true,
     },
     productType: {
-      type: DataTypes.STRING,
+      type: DataTypes.STRING(),
     },
     image: {
       type: DataTypes.TEXT,
@@ -42,7 +42,10 @@ const Products = (sequelize, DataTypes) => {
 
   Product.associate = (models) => {
     Product.hasOne(models.inventories, { foreignKey: "productId" });
-    Product.belongsTo(models.deliveryMethod, { foreignKey: "deliveryMethodId", as: "deliveryMethod" });
+    Product.belongsTo(models.deliveryMethod, {
+      foreignKey: "deliveryMethodId",
+      as: "deliveryMethod",
+    });
   };
 
   return Product;

@@ -93,7 +93,7 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                         for (let rawItem of reportJson) {
                             console.log("🚀 ~ item:", JSON.stringify(rawItem, null, 2));
                             const { sku, status, title, asin, fulfillmentChannel, quantity } = normalizeListingItem(rawItem);
-                            if (existingSkus.has(sku)) continue;
+                            // if (existingSkus.has(sku)) continue;
                             console.log("🚀 ~ sku:", sku)
                             const fulfillmentType = fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
                             // const fulfillmentType = (fulfillmentChannel) => {
