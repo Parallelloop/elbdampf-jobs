@@ -68,6 +68,10 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         console.log("🚀 ~ address:", address)
         console.log("Processing Amazon order:", orderId);
 
+        if(!address.address1 || !address.address2){
+          sendEmail(EMAILS , "Shopify Missing Address",  `Amazon Order ${orderId} is missing address information.`);
+        }
+
         // if(orderId !== "303-8543379-1405916") {
         //   continue;
         // }
