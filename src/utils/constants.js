@@ -7,4 +7,6 @@ const JOB_STATES = {
   NEXT: "_NEXT_",
 };
 
-export { JOB_STATES };
+const EMAILS = ["nabeelsajid917@gmail.com"];
+
+export { JOB_STATES, EMAILS };

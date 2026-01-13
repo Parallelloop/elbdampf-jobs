@@ -7,8 +7,9 @@ import { createCustomer, getCustomerByEmail } from "../../services/shopify/custo
 import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
-import { JOB_STATES } from "../../utils/constants";
+import { EMAILS, JOB_STATES } from "../../utils/constants";
 import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
+import { sendEmail } from "../../utils/send-email";
 
 
 Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
@@ -331,6 +332,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     console.log("*****************************************************************");
     console.log("*****************************************************************");
   } catch (error) {
+    await sendEmail(EMAILS , "Urgent Jobs are Failing",  `Shopify Push Orders Sync Job is failing, error: ${error.message}`);
     console.log("*****************************************************************");
     console.log("********************   Push Orders Shopify Job RETRY   *******************");
     console.log("*****************************************************************");

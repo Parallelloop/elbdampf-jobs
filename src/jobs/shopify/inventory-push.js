@@ -8,7 +8,8 @@ import { createFeedDocument, createFeed, uploadFeedDocument } from "../../servic
 // import { mapItemsFeed } from '../utils/generators';
 import { fetchActiveProducts } from "../../services/shopify/product";
 import Agenda from "../../config/agenda-jobs";
-import { JOB_STATES } from "../../utils/constants";
+import { EMAILS, JOB_STATES } from "../../utils/constants";
+import { sendEmail } from "../../utils/send-email";
 
 
 const flattenProductsWithVariants = (products) => {
@@ -121,6 +122,7 @@ Agenda.define("inventory-push", { concurrency: 1, lockLifetime: 60 * 60000 }, as
     console.log('*****************************************************************');
   } catch (error) {
     console.log("🚀 ~ inventory-push.js ~ error", error)
+    await sendEmail(EMAILS , "Urgent Jobs are Failing",  `Inventory Sync Job is failing, error: ${error.message}`);
     console.log('*****************************************************************');
     console.log('********************    Push Amazon Inventory RETRY   *******************');
     console.log('*****************************************************************');
