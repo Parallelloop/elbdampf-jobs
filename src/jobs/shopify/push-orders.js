@@ -68,10 +68,6 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         console.log("🚀 ~ address:", address)
         console.log("Processing Amazon order:", orderId);
 
-        if(!address.address1 || !address.address2){
-          sendEmail(EMAILS , "Shopify Missing Address",  `Amazon Order ${orderId} is missing address information.`);
-        }
-
         // if(orderId !== "303-8543379-1405916") {
         //   continue;
         // }
@@ -307,6 +303,9 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         }
 
         console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
+        if(!address.address1){
+          sendEmail(EMAILS , "Shopify Missing Address",  `Amazon Order ${orderId}, Shopify Order Id: ${createOrderResp?.order?.id} is missing address information.`);
+        }
         await DB.orders.update(
           { isPosted: true, orderErrors: null },
           { where: { orderId: orderId } }
