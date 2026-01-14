@@ -4,7 +4,7 @@ import DB from "../../database";
 import Orders from "../../database/models/orders";
 import { sleep } from "../../helper/helper";
 import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
-import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
+import { checkShopifyOrder, createShopifyOrder, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
 import { JOB_STATES } from "../../utils/constants";
@@ -299,6 +299,35 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
         if (!createOrderResp?.order?.id) {
           console.warn(`⚠️ Shopify order response missing order ID for Amazon ${orderId}`);
+          continue;
+        }
+
+        const shopifyOrderId = createOrderResp?.order?.id;
+
+        await sleep(2);
+        await job.touch();
+
+        // 💰 Mark order as paid
+        const markPaidResp = await shopifyOrderMarkAsPaid(shopifyOrderId);
+
+        if (!markPaidResp?.success) {
+          const paymentError =
+            markPaidResp?.errors
+              ?.map(e => e.message)
+              .join(", ") ||
+            markPaidResp?.error ||
+            "Failed to mark order as paid";
+
+          await DB.orders.update(
+            { orderErrors: paymentError },
+            { where: { orderId } }
+          );
+
+          console.error(
+            `❌ Failed to mark Shopify order as paid for Amazon ${orderId}:`,
+            paymentError
+          );
+
           continue;
         }
 

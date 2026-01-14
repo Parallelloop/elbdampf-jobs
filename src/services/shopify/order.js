@@ -58,7 +58,7 @@ const createShopifyOrder = async (orderData) => {
         billingAddress: shippingAddress || null,
         note: `Imported from Amazon Order ID: ${amazonOrderId}`,
         processedAt: processedAt,
-        financialStatus: "PAID",
+        financialStatus: "PENDING",
         tags: [`Amazon`],
         customAttributes: [
           { key: "Amazon Order ID", value: String(amazonOrderId) },
@@ -72,7 +72,7 @@ const createShopifyOrder = async (orderData) => {
         {
           kind: "SALE",
           status: "SUCCESS",
-          gateway: "Amazon",
+          gateway: "manual",
           amountSet: {
             shopMoney: {
               amount: totalAmount,
@@ -98,6 +98,69 @@ const createShopifyOrder = async (orderData) => {
     return { success: false, error: error.message };
   }
 };
+
+const shopifyOrderMarkAsPaid = async (shopifyOrderId) => {
+  try {
+    const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
+
+    const mutation = `
+      mutation orderMarkAsPaid($input: OrderMarkAsPaidInput!) {
+        orderMarkAsPaid(input: $input) {
+          userErrors {
+            field
+            message
+          }
+          order {
+            id
+            name
+            canMarkAsPaid
+            displayFinancialStatus
+            totalOutstandingSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            transactions(first: 10) {
+              id
+              kind
+              status
+              gateway
+              amountSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              createdAt
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: shopifyOrderId,
+      },
+    };
+
+    const response = await graphClient.request(mutation, { variables });
+    console.log("🚀 ~ shopifyOrderMarkAsPaid ~ response:", JSON.stringify(response, null, 2));
+
+    const { userErrors, order } = response?.data?.orderMarkAsPaid || {};
+
+    if (userErrors?.length) {
+      return { success: false, errors: userErrors };
+    }
+
+    return { success: true, order };
+  } catch (error) {
+    console.error("❌ Shopify order Mark as Paid failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 
 const checkShopifyOrder = async (amazonOrderId, email) => {
   try {
@@ -219,5 +282,6 @@ const getShopifyOrder = async (shopifyOrderId) => {
 export {
   createShopifyOrder,
   checkShopifyOrder,
-  getShopifyOrder
+  getShopifyOrder,
+  shopifyOrderMarkAsPaid
 }
