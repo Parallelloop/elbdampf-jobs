@@ -146,7 +146,7 @@ const shopifyOrderMarkAsPaid = async (shopifyOrderId) => {
     };
 
     const response = await graphClient.request(mutation, { variables });
-    console.log("🚀 ~ shopifyOrderMarkAsPaid ~ response:", JSON.stringify(response, null, 2));
+    // console.log("🚀 ~ shopifyOrderMarkAsPaid ~ response:", JSON.stringify(response, null, 2));
 
     const { userErrors, order } = response?.data?.orderMarkAsPaid || {};
 
