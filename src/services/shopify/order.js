@@ -54,7 +54,6 @@ const createShopifyOrder = async (orderData) => {
       order: {
         email: buyerEmail,
         lineItems: lineItems,
-        // inventoryBehaviour: "DECREMENT_OBEYING_POLICY",
         shippingAddress: shippingAddress || null,
         billingAddress: shippingAddress || null,
         note: `Imported from Amazon Order ID: ${amazonOrderId}`,
@@ -82,7 +81,9 @@ const createShopifyOrder = async (orderData) => {
           },
         },
       ],
-      options: null
+      options: {
+        inventoryBehaviour: "DECREMENT_OBEYING_POLICY",
+      }
     };
 
     const response = await graphClient.request(mutation, { variables });
