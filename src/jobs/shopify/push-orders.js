@@ -7,7 +7,7 @@ import { createCustomer, getCustomerByEmail } from "../../services/shopify/custo
 import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
-import { EMAILS, JOB_STATES } from "../../utils/constants";
+import { JOB_STATES } from "../../utils/constants";
 import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
 import { sendEmail } from "../../utils/send-email";
 
@@ -303,8 +303,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         }
 
         console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
-        if(!address.address1){
-          sendEmail(EMAILS , "Shopify Missing Address",  `Amazon Order ${orderId}, Shopify Order Id: ${createOrderResp?.order?.id} is missing address information.`);
+        const setting = await DB.settings.findOne({ where: { id: 1 } });
+        if (!setting) {
+          console.warn(`⚠️ No settings found Email is not sending ${orderId}`);
+        }
+        if (!address.address1 && setting?.emailOnErrors) {
+          sendEmail(setting.errorEmails, "Shopify Missing Address", `Amazon Order ${orderId}, Shopify Order Id: ${createOrderResp?.order?.id} is missing address information.`);
         }
         await DB.orders.update(
           { isPosted: true, orderErrors: null },
@@ -335,7 +339,13 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     console.log("*****************************************************************");
     console.log("*****************************************************************");
   } catch (error) {
-    await sendEmail(EMAILS , "Urgent Jobs are Failing",  `Shopify Push Orders Sync Job is failing, error: ${error.message}`);
+    const setting = await DB.settings.findOne({ where: { id: 1 } });
+    if (!setting) {
+      console.log("⚠️ No settings found");
+    }
+    if (setting?.emailOnErrors) {
+      await sendEmail(setting.errorEmails, "Urgent Jobs are Failing", `Shopify Push Orders Sync Job is failing, error: ${error.message}`);
+    }
     console.log("*****************************************************************");
     console.log("********************   Push Orders Shopify Job RETRY   *******************");
     console.log("*****************************************************************");

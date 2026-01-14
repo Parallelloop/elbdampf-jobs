@@ -7,6 +7,4 @@ const JOB_STATES = {
   NEXT: "_NEXT_",
 };
 
-const EMAILS = ["nabeelsajid917@gmail.com", "patrick@shiplogic.app"];
-
-export { JOB_STATES, EMAILS };
+export { JOB_STATES };

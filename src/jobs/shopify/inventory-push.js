@@ -8,7 +8,7 @@ import { createFeedDocument, createFeed, uploadFeedDocument } from "../../servic
 // import { mapItemsFeed } from '../utils/generators';
 import { fetchActiveProducts } from "../../services/shopify/product";
 import Agenda from "../../config/agenda-jobs";
-import { EMAILS, JOB_STATES } from "../../utils/constants";
+import { JOB_STATES } from "../../utils/constants";
 import { sendEmail } from "../../utils/send-email";
 
 
@@ -121,8 +121,14 @@ Agenda.define("inventory-push", { concurrency: 1, lockLifetime: 60 * 60000 }, as
     console.log('*****************************************************************');
     console.log('*****************************************************************');
   } catch (error) {
-    console.log("🚀 ~ inventory-push.js ~ error", error)
-    await sendEmail(EMAILS , "Urgent Jobs are Failing",  `Inventory Sync Job is failing, error: ${error.message}`);
+    console.log("🚀 ~ inventory-push.js ~ error", error);
+    const setting = await DB.settings.findOne({ where: { id: 1 } });
+    if(!setting) {
+      console.log("⚠️ No settings found");
+    }
+    if(setting?.emailOnErrors) {
+      await sendEmail(setting.errorEmails , "Urgent Jobs are Failing",  `Inventory Sync Job is failing, error: ${error.message}`);
+    }
     console.log('*****************************************************************');
     console.log('********************    Push Amazon Inventory RETRY   *******************');
     console.log('*****************************************************************');

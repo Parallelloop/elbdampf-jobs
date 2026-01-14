@@ -2,7 +2,7 @@ import moment from "moment";
 import Agenda from "../../config/agenda-jobs";
 import AmazonClient from "../../services/sp-api/client";
 import DB from "../../database";
-import { EMAILS, JOB_STATES } from "../../utils/constants";
+import { JOB_STATES } from "../../utils/constants";
 import { downloadDocument, getReport, getReportDocument, getReportId } from "../../services/sp-api";
 import { parseTSV } from "../../utils/parse";
 import getListingsItem from "../../services/sp-api/listings/get-listings-item";
@@ -145,7 +145,13 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
         console.log(`reportId: ${reportId}`);
         console.log("*****************************************************************");
     } catch (error) {
-        await sendEmail(EMAILS , "Urgent Jobs are Failing",  `Listing Report Sync Job is failing, error: ${error.message}`);
+        const setting = await DB.settings.findOne({ where: { id: 1 } });
+        if (!setting) {
+            console.log("⚠️ No settings found");
+        }
+        if (setting?.emailOnErrors) {
+            await sendEmail(setting.errorEmails, "Urgent Jobs are Failing", `Listing Report Sync Job is failing, error: ${error.message}`);
+        }
         console.log("*****************************************************************");
         console.log("********************    Fetch Listing Report RETRY   *******************");
         console.log("*****************************************************************");

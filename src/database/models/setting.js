@@ -23,6 +23,10 @@ const Settings = (sequelize, DataTypes) => {
         type: DataTypes.STRING, // minutes
         defaultValue: "30 minutes",
       },
+      errorEmails: {
+				type: DataTypes.ARRAY(DataTypes.STRING),
+				defaultValue: [],
+    	},
       importFBM: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
