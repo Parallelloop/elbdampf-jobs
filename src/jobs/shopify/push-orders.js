@@ -109,6 +109,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         let subtotal = 0;
         let taxTotal = 0;
         let deliveryMethodTag = null;
+        let firstOtherMethod = null;  // first other method if hardware not found
         let skipOrder = false;
         for (let j = 0; j < amazonOrderItems.length; j++) {
           const item = amazonOrderItems[j];
@@ -123,7 +124,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           });
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
-          deliveryMethodTag = tagFromProduct;
+          if (tagFromProduct === "hardware") {
+            deliveryMethodTag = "hardware"; // highest priority
+          } else if (!firstOtherMethod && tagFromProduct) {
+            firstOtherMethod = tagFromProduct;
+          }
+
           const qty = item?.QuantityOrdered || 1;
 
           const variantResult = await findVariantProduct({ query: sku });
@@ -188,7 +194,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           continue; // move to next Amazon order
         }
 
-        const finalTag = deliveryMethodTag || "standard";
+        const finalTag = deliveryMethodTag || firstOtherMethod || "standard";
+
         console.log("🚀 ~ finalTag:", finalTag)
 
         const shippingLines = finalTag
