@@ -16,7 +16,9 @@ const bulkSaveSequelize = async (data) => {
         const productBulk = [];
         const skuToInventory = new Map();
 
-        for (const item of data) {
+        for (let i = 0; i < data.length; i++) {
+            const item = data[i];
+
             productBulk.push({
                 sku: item.sku,
                 asin: item.asin,
@@ -78,6 +80,9 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                     const report = await downloadDocument({ client, reportData });
                     if (report) {
                         const reportJson = await parseTSV(report);
+                        let total = 0;
+                        let mapped = 0;
+                        let unmapped = 0;
                         console.log("🚀 ~ reportJson:", reportJson.length)
                         // console.log("🚀 ~ reportJson:", JSON.stringify(reportJson, null, 2));
                         const existingProducts = await DB.products.findAll({
@@ -94,6 +99,11 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                         for (let rawItem of reportJson) {
                             console.log("🚀 ~ item:", JSON.stringify(rawItem, null, 2));
                             const { sku, status, title, asin, fulfillmentChannel, quantity } = normalizeListingItem(rawItem);
+                            if (sku && asin && status === "Active") {
+                                mapped++;
+                            } else {
+                                unmapped++;
+                            }
                             // if (existingSkus.has(sku)) continue;
                             console.log("🚀 ~ sku:", sku)
                             const fulfillmentType = fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
@@ -121,7 +131,19 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                                 shippingMethod: fulfillmentType,
                                 productType,
                             });
+                            total++;
                         }
+                        const mappedPercentage = total ? Math.round((mapped / total) * 100) : 0;
+                        const unmappedPercentage = 100 - mappedPercentage;
+                        await DB.productHealthStats.upsert({
+                            id: 1, // single-row pattern
+                            totalProducts: total,
+                            mappedProducts: mapped,
+                            unmappedProducts: unmapped,
+                            mappedPercentage,
+                            unmappedPercentage,
+                            lastSyncedAt: new Date(),
+                        });
                         await bulkSaveSequelize(data);
                         job.attrs.data.reportId = null;
                         await job.save();
