@@ -17,9 +17,9 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
-
+    let totalImportCount = 0;
     let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
-    if(lastUpdatedAfter){
+    if (lastUpdatedAfter) {
       lastUpdatedAfter = moment(lastUpdatedAfter).subtract(15, 'minutes').toISOString();
     } else {
       lastUpdatedAfter = moment().subtract(1, 'day').toISOString();
@@ -109,7 +109,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         let subtotal = 0;
         let taxTotal = 0;
         let deliveryMethodTag = null;
-        let firstOtherMethod = null;  // first other method if hardware not found
+        let currentPriority = 0;
         let skipOrder = false;
         for (let j = 0; j < amazonOrderItems.length; j++) {
           const item = amazonOrderItems[j];
@@ -124,10 +124,11 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           });
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
-          if (tagFromProduct === "hardware") {
-            deliveryMethodTag = "hardware"; // highest priority
-          } else if (!firstOtherMethod && tagFromProduct) {
-            firstOtherMethod = tagFromProduct;
+          const priorityFromProduct = productRecord?.deliveryMethod?.priority || 0;
+
+          if (!deliveryMethodTag || priorityFromProduct < currentPriority) {
+            deliveryMethodTag = tagFromProduct;
+            currentPriority = priorityFromProduct;
           }
 
           const qty = item?.QuantityOrdered || 1;
@@ -142,8 +143,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           const taxRate = 0.19;
 
           const taxAmount = totalItemPrice * (taxRate / (1 + taxRate));
-          const netTotalPrice = totalItemPrice - taxAmount;          
-          
+          const netTotalPrice = totalItemPrice - taxAmount;
+
           const variant = variantResult.variants[0];
           const unitPrice = qty > 0 ? netTotalPrice / qty : 0;
           subtotal += netTotalPrice;
@@ -194,7 +195,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           continue; // move to next Amazon order
         }
 
-        const finalTag = deliveryMethodTag || firstOtherMethod || "standard";
+        const finalTag = deliveryMethodTag || "standard";
 
         console.log("🚀 ~ finalTag:", finalTag)
 
@@ -216,7 +217,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
         let shopifyCustomer = await getCustomerByEmail(buyerEmail);
         await sleep(5); // 5 seconds
-        
+
         if (!shopifyCustomer) {
           const newCustomerPayload = {
             email: buyerEmail,
@@ -339,6 +340,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         }
 
         console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
+        totalImportCount++;
         const setting = await DB.settings.findOne({ where: { id: 1 } });
         if (!setting) {
           console.warn(`⚠️ No settings found Email is not sending ${orderId}`);
@@ -364,7 +366,8 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     }
 
     console.log("✅ All pages processed successfully.");
-
+    console.log(`📊 Total Amazon Orders Imported: ${totalImportCount}`);
+    job.attrs.data.totalImportCount = totalImportCount;
     job.attrs.state = JOB_STATES.COMPLETED;
     job.attrs.lockedAt = null;
     job.attrs.progress = 100;
