@@ -274,25 +274,25 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
             if (orders.length >= 2) {
-              finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
+              // finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
+              finalDeliveryMethod = "coils";
+              const setMetaFields = {
+                metafields: [
+                  {
+                    ownerId: shopifyCustomer?.id,
+                    namespace: "custom",
+                    key: "delivery_method",
+                    type: "single_line_text_field",
+                    value: finalDeliveryMethod
+                  }
+                ]
+              }
+              const updateMetaFieldResponse = await updateCustomerMetafield(setMetaFields);
+              if (!updateMetaFieldResponse?.success) {
+                console.log("⚠️ Could not update customer metafield");
+              }
             }
-
             console.log("🚚 Final delivery method:", finalDeliveryMethod);
-            const setMetaFields = {
-              metafields: [
-                {
-                  ownerId: shopifyCustomer?.id,
-                  namespace: "custom",
-                  key: "delivery_method",
-                  type: "single_line_text_field",
-                  value: finalDeliveryMethod
-                }
-              ]
-            }
-            const updateMetaFieldResponse = await updateCustomerMetafield(setMetaFields);
-            if (!updateMetaFieldResponse?.success) {
-              console.log("⚠️ Could not update customer metafield");
-            }
           }
         }
         const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
@@ -313,6 +313,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         }
 
         const createOrderResp = await createShopifyOrder({
+          customerId: shopifyCustomer?.id,
           buyerEmail,
           totalAmount,
           processedAt,

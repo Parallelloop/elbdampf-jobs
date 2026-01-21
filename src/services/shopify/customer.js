@@ -7,7 +7,7 @@ const getCustomerByEmail = async (email) => {
     const response = await client.request(
       `
         query GetCustomerByEmail($query: String!) {
-          customers(first: 10, query: $query) {
+          customers(first: 2, query: $query) {
             edges {
               node {
                 id
@@ -50,16 +50,26 @@ const getCustomerByEmail = async (email) => {
         },
       }
     );
-   
-    const customer = response?.data?.customers?.edges?.[0]?.node || null;
 
-    if (customer) {
-      console.log("✅ Customer found:", customer.email);
-    } else {
+    const customers = response?.data?.customers?.edges?.map(e => e.node) || [];
+
+    if (!customers.length) {
       console.log("⚠️ No customer found with email:", email);
+      return null;
     }
 
-    return customer;
+    // ✅ Prefer NON-blacklisted email
+    const realCustomer = customers.find(
+      c => !c.email.startsWith("blacklisted-")
+    );
+    if (realCustomer) {
+      console.log("✅ Real Customer found:", realCustomer.email);
+    } else {
+      console.log("⚠️ No real customer found. Using first customer:", customers[0]?.email);
+    }
+
+    return realCustomer || customers[0];
+
   } catch (error) {
     console.error("❌ Failed to fetch customer by email:", error);
     throw error;
