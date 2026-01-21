@@ -338,6 +338,11 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         await sleep(5); // 5 seconds
         await job.touch();
 
+        const setting = await DB.settings.findOne({ where: { id: 1 } });
+        if (!setting) {
+          console.warn(`⚠️ No settings found Email is not sending ${orderId}`);
+        }
+
         if (
           !createOrderResp?.success ||
           createOrderResp?.errors?.length
@@ -358,6 +363,10 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             `❌ Shopify order failed for Amazon ${orderId}:`,
             errorMessage
           );
+
+          if (setting?.emailOnErrors) {
+            sendEmail(setting.errorEmails, "Shopify Order Creation Failed", `Amazon Order ${orderId}, Shopify Order creation failed with error ${errorMessage}`);
+          }
 
           continue; // DO NOT touch order.id
         }
@@ -393,15 +402,15 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             paymentError
           );
 
+          if (setting?.emailOnErrors) {
+            sendEmail(setting.errorEmails, "Shopify Order Mark Paid Failed", `Amazon Order ${orderId}, Shopify Order Mark as Paid failed with error ${paymentError}`);
+          }
+
           continue;
         }
 
         console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
         totalImportCount++;
-        const setting = await DB.settings.findOne({ where: { id: 1 } });
-        if (!setting) {
-          console.warn(`⚠️ No settings found Email is not sending ${orderId}`);
-        }
         if (!address.address1 && setting?.emailOnErrors) {
           sendEmail(setting.errorEmails, "Shopify Missing Address", `Amazon Order ${orderId}, Shopify Order Id: ${createOrderResp?.order?.id} is missing address information.`);
         }
