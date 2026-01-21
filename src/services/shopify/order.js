@@ -52,11 +52,13 @@ const createShopifyOrder = async (orderData) => {
 
     const variables = {
       order: {
-        customer: {
-          toAssociate: {
-            id: customerId,
+        ...(customerId && {
+          customer: {
+            toAssociate: {
+              id: customerId,
+            },
           },
-        },
+        }),
         email: buyerEmail,
         lineItems: lineItems,
         shippingAddress: shippingAddress || null,
@@ -263,7 +265,7 @@ const getShopifyOrdersByCustomerEmail = async (
     `;
 
     const variables = {
-    query: `email:${email} financial_status:${status} -cancelled_at:*`,
+      query: `email:${email} financial_status:${status} -cancelled_at:*`,
       first: limit
     };
 
