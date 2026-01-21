@@ -276,6 +276,18 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             if (orders.length >= 2) {
               // finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
               finalDeliveryMethod = "coils";
+              shippingLines = [
+              {
+                title: finalDeliveryMethod,
+                code: finalDeliveryMethod,
+                priceSet: {
+                  shopMoney: {
+                    amount: "0.0",
+                    currencyCode: "EUR",
+                  },
+                },
+              },
+            ];
               const setMetaFields = {
                 metafields: [
                   {
