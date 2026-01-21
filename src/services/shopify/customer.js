@@ -14,6 +14,12 @@ const getCustomerByEmail = async (email) => {
                 email
                 firstName
                 lastName
+                metafield(namespace: "custom", key: "delivery_method") {
+                  id
+                  value
+                  type
+                  namespace
+                }
                 createdAt
                 updatedAt
                 numberOfOrders
@@ -121,9 +127,50 @@ const createCustomer = async (input) => {
   }
 };
 
+const updateCustomerMetafield = async (input) => {
+  try {
+    const client = GetGrapqlClient({ scopes: ["write_customers"] });
+
+    const response = await client.request(
+      `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            namespace
+            key
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+      `,
+      {
+        variables: input
+      }
+    );
+
+    const result = response?.data?.metafieldsSet;
+
+    if (result?.userErrors?.length) {
+      console.error("❌ Metafield update errors:", result.userErrors);
+      return { success: false, errors: result.userErrors };
+    }
+
+    return { success: true, metafield: result.metafields[0] };
+
+  } catch (error) {
+    console.error("❌ Metafield update failed:", error.message);
+    return { success: false, error: error.message };
+  }
+};
 
 
 export {
   createCustomer,
-  getCustomerByEmail
+  getCustomerByEmail,
+  updateCustomerMetafield
 };

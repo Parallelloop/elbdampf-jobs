@@ -226,6 +226,53 @@ const checkShopifyOrder = async (amazonOrderId, email) => {
   }
 };
 
+const getShopifyOrdersByCustomerEmail = async (
+  email,
+  status = "paid",
+  limit = 250
+) => {
+  try {
+    if (!email) {
+      return { success: false, error: "No email provided" };
+    }
+
+    const client = GetGrapqlClient({ scopes: ["read_orders"] });
+
+    const query = `
+      query Orders($query: String!, $first: Int!) {
+        orders(first: $first, query: $query) {
+          edges {
+            node {
+              id
+              name
+              email
+              createdAt
+              shippingLine {
+                title
+                price
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+    query: `email:${email} financial_status:${status} -cancelled_at:*`,
+      first: limit
+    };
+
+    const response = await client.request(query, { variables });
+
+    const orders = response?.data?.orders?.edges || [];
+
+    return { success: true, orders };
+  } catch (error) {
+    console.error("❌ Failed to fetch Shopify orders:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
 const getShopifyOrder = async (shopifyOrderId) => {
   try {
     if (!shopifyOrderId) {
@@ -285,5 +332,6 @@ export {
   createShopifyOrder,
   checkShopifyOrder,
   getShopifyOrder,
-  shopifyOrderMarkAsPaid
+  shopifyOrderMarkAsPaid,
+  getShopifyOrdersByCustomerEmail
 }

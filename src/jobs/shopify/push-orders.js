@@ -1,14 +1,13 @@
 import moment from "moment";
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
-import Orders from "../../database/models/orders";
-import { sleep } from "../../helper/helper";
-import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
-import { checkShopifyOrder, createShopifyOrder, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
+import { getMostUsedDeliveryMethod, sleep } from "../../helper/helper";
+import { createCustomer, getCustomerByEmail, updateCustomerMetafield } from "../../services/shopify/customer";
+import { checkShopifyOrder, createShopifyOrder, getShopifyOrdersByCustomerEmail, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
-import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
+import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
 import { JOB_STATES } from "../../utils/constants";
-import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
+import { clean } from "../../utils/generators";
 import { sendEmail } from "../../utils/send-email";
 
 
@@ -199,20 +198,18 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
         console.log("🚀 ~ finalTag:", finalTag)
 
-        const shippingLines = finalTag
-          ? [
-            {
-              title: finalTag,
-              code: finalTag,
-              priceSet: {
-                shopMoney: {
-                  amount: "0.0",
-                  currencyCode: "EUR",
-                },
+        let shippingLines = [
+          {
+            title: finalTag,
+            code: finalTag,
+            priceSet: {
+              shopMoney: {
+                amount: "0.0",
+                currencyCode: "EUR",
               },
             },
-          ]
-          : [];
+          },
+        ];
         const totalAmount = subtotal + taxTotal;
 
         let shopifyCustomer = await getCustomerByEmail(buyerEmail);
@@ -250,6 +247,53 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             shopifyCustomer = shopifyCustomer?.edges[0]?.node;
           }
           console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
+          if (shopifyCustomer?.metafield?.value) {
+            console.log("🚚 Customer delivery_method metafield found:", shopifyCustomer?.metafield?.value);
+            shippingLines = [
+              {
+                title: shopifyCustomer?.metafield?.value,
+                code: shopifyCustomer?.metafield?.value,
+                priceSet: {
+                  shopMoney: {
+                    amount: "0.0",
+                    currencyCode: "EUR",
+                  },
+                },
+              },
+            ];
+          } else {
+            let finalDeliveryMethod = null;
+            console.log("⚠️ No customer delivery_method metafield found:");
+            const customerOrdersResp = await getShopifyOrdersByCustomerEmail(buyerEmail);
+
+            if (!customerOrdersResp?.success) {
+              console.log("⚠️ Could not fetch customer orders");
+            }
+
+            const orders = customerOrdersResp?.orders || [];
+            console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
+
+            if (orders.length >= 2) {
+              finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
+            }
+
+            console.log("🚚 Final delivery method:", finalDeliveryMethod);
+            const setMetaFields = {
+              metafields: [
+                {
+                  ownerId: shopifyCustomer?.id,
+                  namespace: "custom",
+                  key: "delivery_method",
+                  type: "single_line_text_field",
+                  value: finalDeliveryMethod
+                }
+              ]
+            }
+            const updateMetaFieldResponse = await updateCustomerMetafield(setMetaFields);
+            if (!updateMetaFieldResponse?.success) {
+              console.log("⚠️ Could not update customer metafield");
+            }
+          }
         }
         const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
         console.log("🚀 ~ shippingAddressForOrder:", shippingAddressForOrder)
