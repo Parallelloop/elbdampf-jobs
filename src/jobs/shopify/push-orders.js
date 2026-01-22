@@ -442,54 +442,54 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
       await sleep(5); // 5 seconds between page
     }
 
-    if (customers.length > 0) {
-      console.log(`✅ Found ${customers.length} customers to process.`);
+    // if (customers.length > 0) {
+    //   console.log(`✅ Found ${customers.length} customers to process.`);
 
-      const outputPath = path.resolve(process.cwd(), "customers.csv");
-      const ws = fs.createWriteStream(outputPath);
-      const csvStream = csv.format({
-        headers: [
-          "firstName",
-          "lastName",
-          "email",
-          "deliveryMethod",
-        ]
-      });
+    //   const outputPath = path.resolve(process.cwd(), "customers.csv");
+    //   const ws = fs.createWriteStream(outputPath);
+    //   const csvStream = csv.format({
+    //     headers: [
+    //       "firstName",
+    //       "lastName",
+    //       "email",
+    //       "deliveryMethod",
+    //     ]
+    //   });
 
-      csvStream
-        .pipe(ws)
-        .on("finish", async () => {
-          console.log("✅ CSV created at:", outputPath);
+    //   csvStream
+    //     .pipe(ws)
+    //     .on("finish", async () => {
+    //       console.log("✅ CSV created at:", outputPath);
 
-          try {
-            await sendEmail(
-              EmailsForCustomers,
-              "Shopify Customers Delivery Methods",
-              "Attached is the customers CSV.",
-              [{ filename: "customers.csv", path: outputPath }]
-            );
+    //       try {
+    //         await sendEmail(
+    //           EmailsForCustomers,
+    //           "Shopify Customers Delivery Methods",
+    //           "Attached is the customers CSV.",
+    //           [{ filename: "customers.csv", path: outputPath }]
+    //         );
 
-            console.log("📨 Email sent with CSV attachment");
-          } catch (emailError) {
-            console.error("❌ Failed to send email:", emailError);
-          } finally {
-            fs.unlink(outputPath, (err) => {
-              if (err) {
-                console.error("❌ Failed to delete CSV:", err);
-              } else {
-                console.log("🗑️ CSV file deleted successfully");
-              }
-            });
-          }
-        })
-        .on("error", console.error);
+    //         console.log("📨 Email sent with CSV attachment");
+    //       } catch (emailError) {
+    //         console.error("❌ Failed to send email:", emailError);
+    //       } finally {
+    //         fs.unlink(outputPath, (err) => {
+    //           if (err) {
+    //             console.error("❌ Failed to delete CSV:", err);
+    //           } else {
+    //             console.log("🗑️ CSV file deleted successfully");
+    //           }
+    //         });
+    //       }
+    //     })
+    //     .on("error", console.error);
 
-      // ✍️ Write all customers
-      for (let i = 0; i < customers.length; i++) {
-        csvStream.write(customers[i]);
-      }
-      csvStream.end();
-    }
+    //   // ✍️ Write all customers
+    //   for (let i = 0; i < customers.length; i++) {
+    //     csvStream.write(customers[i]);
+    //   }
+    //   csvStream.end();
+    // }
 
     console.log("✅ All pages processed successfully.");
     console.log(`📊 Total Amazon Orders Imported: ${totalImportCount}`);
