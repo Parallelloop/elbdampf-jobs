@@ -9,6 +9,9 @@ import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/
 import { JOB_STATES } from "../../utils/constants";
 import { clean } from "../../utils/generators";
 import { sendEmail } from "../../utils/send-email";
+import fs from 'fs';
+import path from 'path';
+const csv = require('fast-csv');
 
 
 Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
@@ -16,6 +19,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
+    const EmailsForCustomers = ["nabeelsajid917@gmail.com", "patrick@shiplogic.app"];
     let totalImportCount = 0;
     let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
     if (lastUpdatedAfter) {
@@ -28,6 +32,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
+    let customers = [];
     while (true) {
       const { amazonOrders, nextToken: newNextToken } = await fetchAmazonFBMOrdersPage({
         nextToken,
@@ -276,18 +281,24 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             if (orders.length >= 2) {
               // finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
               finalDeliveryMethod = "coils";
+              customers.push({
+                firstName: shopifyCustomer?.firstName,
+                lastName: shopifyCustomer?.lastName,
+                email: shopifyCustomer?.email,
+                deliveryMethod: finalDeliveryMethod,
+              });
               shippingLines = [
-              {
-                title: finalDeliveryMethod,
-                code: finalDeliveryMethod,
-                priceSet: {
-                  shopMoney: {
-                    amount: "0.0",
-                    currencyCode: "EUR",
+                {
+                  title: finalDeliveryMethod,
+                  code: finalDeliveryMethod,
+                  priceSet: {
+                    shopMoney: {
+                      amount: "0.0",
+                      currencyCode: "EUR",
+                    },
                   },
                 },
-              },
-            ];
+              ];
               const setMetaFields = {
                 metafields: [
                   {
@@ -429,6 +440,55 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
       await job.touch();
 
       await sleep(5); // 5 seconds between page
+    }
+
+    if (customers.length > 0) {
+      console.log(`✅ Found ${customers.length} customers to process.`);
+
+      const outputPath = path.resolve(process.cwd(), "customers.csv");
+      const ws = fs.createWriteStream(outputPath);
+      const csvStream = csv.format({
+        headers: [
+          "firstName",
+          "lastName",
+          "email",
+          "deliveryMethod",
+        ]
+      });
+
+      csvStream
+        .pipe(ws)
+        .on("finish", async () => {
+          console.log("✅ CSV created at:", outputPath);
+
+          try {
+            await sendEmail(
+              EmailsForCustomers,
+              "Shopify Customers Delivery Methods",
+              "Attached is the customers CSV.",
+              [{ filename: "customers.csv", path: outputPath }]
+            );
+
+            console.log("📨 Email sent with CSV attachment");
+          } catch (emailError) {
+            console.error("❌ Failed to send email:", emailError);
+          } finally {
+            fs.unlink(outputPath, (err) => {
+              if (err) {
+                console.error("❌ Failed to delete CSV:", err);
+              } else {
+                console.log("🗑️ CSV file deleted successfully");
+              }
+            });
+          }
+        })
+        .on("error", console.error);
+
+      // ✍️ Write all customers
+      for (let i = 0; i < customers.length; i++) {
+        csvStream.write(customers[i]);
+      }
+      csvStream.end();
     }
 
     console.log("✅ All pages processed successfully.");

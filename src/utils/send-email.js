@@ -3,7 +3,7 @@ const nodemailer = require('nodemailer');
 const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, FROM_EMAIL } =
   process.env;
 
-const sendEmail = async (email, subject, bodyPart) => {
+const sendEmail = async (email, subject, bodyPart, attachments = []) => {
   let transporter = nodemailer.createTransport({
     host: SMTP_HOST,
     port: Number(SMTP_PORT) || 587,
@@ -21,6 +21,7 @@ const sendEmail = async (email, subject, bodyPart) => {
     to: email,
     subject: subject,
     html: bodyPart,
+    attachments: attachments,
   });
 
   console.log(`Email sent: ${info.messageId}`);
