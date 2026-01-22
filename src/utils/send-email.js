@@ -12,8 +12,8 @@ const sendEmail = async (email, subject, bodyPart, attachments = []) => {
       user: SMTP_USER || "apikey",
       pass: SMTP_PASSWORD,
     },
-    logger: true,
-    debug: true,
+    // logger: true,
+    // debug: true,
   });
 
   let info = await transporter.sendMail({
