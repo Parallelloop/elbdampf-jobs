@@ -121,13 +121,19 @@ const getAllCustomers = async () => {
 
       const customersData = response?.data?.customers;
 
-      const customers = customersData?.edges?.map(e => e.node) || [];
-      allCustomers.push(...customers);
+      const filteredCustomers =
+        customersData?.edges
+          ?.map(e => e.node)
+          ?.filter(c => c?.metafield?.value != null) || [];
+
+      allCustomers.push(...filteredCustomers);
 
       hasNextPage = customersData?.pageInfo?.hasNextPage;
       cursor = customersData?.pageInfo?.endCursor;
 
-      console.log(`📦 Fetched ${customers.length} customers, total: ${allCustomers.length}`);
+      console.log(
+        `📦 Fetched ${filteredCustomers.length} customers with delivery_method, total: ${allCustomers.length}`
+      );
     }
 
     if (!allCustomers.length) {
