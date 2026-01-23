@@ -124,7 +124,7 @@ const getAllCustomers = async () => {
       const filteredCustomers =
         customersData?.edges
           ?.map(e => e.node)
-          ?.filter(c => c?.metafield?.value != null) || [];
+          ?.filter(c => c?.metafield?.value === "coils") || [];
 
       allCustomers.push(...filteredCustomers);
 
