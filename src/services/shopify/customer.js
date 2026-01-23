@@ -76,6 +76,74 @@ const getCustomerByEmail = async (email) => {
   }
 };
 
+const getAllCustomers = async () => {
+  try {
+    const client = GetGrapqlClient({ scopes: ["read_customers"] });
+
+    let allCustomers = [];
+    let hasNextPage = true;
+    let cursor = null;
+
+    while (hasNextPage) {
+      const response = await client.request(
+        `
+        query GetCustomers($query: String!, $cursor: String) {
+          customers(first: 250, after: $cursor, query: $query) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              cursor
+              node {
+                id
+                email
+                firstName
+                lastName
+                createdAt
+                updatedAt
+                numberOfOrders
+                metafield(namespace: "custom", key: "delivery_method") {
+                  value
+                }
+              }
+            }
+          }
+        }
+        `,
+        {
+          variables: {
+            query: "",
+            cursor
+          }
+        }
+      );
+
+      const customersData = response?.data?.customers;
+
+      const customers = customersData?.edges?.map(e => e.node) || [];
+      allCustomers.push(...customers);
+
+      hasNextPage = customersData?.pageInfo?.hasNextPage;
+      cursor = customersData?.pageInfo?.endCursor;
+
+      console.log(`📦 Fetched ${customers.length} customers, total: ${allCustomers.length}`);
+    }
+
+    if (!allCustomers.length) {
+      console.log("⚠️ No customers found");
+      return [];
+    }
+
+    return allCustomers;
+
+  } catch (error) {
+    console.error("❌ Failed to fetch customers:", error);
+    throw error;
+  }
+};
+
+
 const createCustomer = async (input) => {
   try {
     const client = GetGrapqlClient({ scopes: ["write_customers"] });
@@ -181,6 +249,7 @@ const updateCustomerMetafield = async (input) => {
 
 export {
   createCustomer,
+  getAllCustomers,
   getCustomerByEmail,
   updateCustomerMetafield
 };
