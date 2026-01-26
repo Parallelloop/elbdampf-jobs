@@ -107,19 +107,17 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                             // if (existingSkus.has(sku)) continue;
                             console.log("🚀 ~ sku:", sku)
                             const fulfillmentType = fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
-                            // const fulfillmentType = (fulfillmentChannel) => {
-                            //     if (fulfillmentChannel === "DEFAULT") return "FBM"; // merchant fulfillment
-                            //     if (fulfillmentChannel === "AMAZON_EU" || fulfillmentChannel === "AMAZON_FBA" || fulfillmentChannel === "AFN") return "FBA";
-                            //     return "FBM"; // everything else shipped by merchant
-                            // };
-
 
                             const listingInfo = await getListingsItem({ client, sku });
                             // console.log("🚀 ~ listingInfo:", JSON.stringify(listingInfo, null, 2));
-                            let image = "";
+
+                            if (!listingInfo) {
+                                continue;
+                            }
+
                             const summary = listingInfo.summaries?.[0] || {};
                             const productType = summary.productType || "";
-                            image = summary.mainImage?.link || "";
+                            const image = summary.mainImage?.link || "";
 
                             data.push({
                                 status,
