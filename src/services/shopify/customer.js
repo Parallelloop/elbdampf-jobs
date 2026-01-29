@@ -14,7 +14,13 @@ const getCustomerByEmail = async (email) => {
                 email
                 firstName
                 lastName
-                metafield(namespace: "custom", key: "delivery_method") {
+                deliveryMethod: metafield(namespace: "custom", key: "delivery_method") {
+                  id
+                  value
+                  type
+                  namespace
+                }
+                blacklisted: metafield(namespace: "custom", key: "blacklisted") {
                   id
                   value
                   type

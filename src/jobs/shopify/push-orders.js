@@ -9,17 +9,12 @@ import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/
 import { JOB_STATES } from "../../utils/constants";
 import { clean } from "../../utils/generators";
 import { sendEmail } from "../../utils/send-email";
-import fs from 'fs';
-import path from 'path';
-const csv = require('fast-csv');
-
 
 Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
   console.log("*********************************************************");
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
-    const EmailsForCustomers = ["nabeelsajid917@gmail.com", "patrick@shiplogic.app"];
     let totalImportCount = 0;
     let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
     if (lastUpdatedAfter) {
@@ -32,7 +27,6 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
-    let customers = [];
     while (true) {
       const { amazonOrders, nextToken: newNextToken } = await fetchAmazonFBMOrdersPage({
         nextToken,
@@ -71,11 +65,6 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         };
         console.log("🚀 ~ address:", address)
         console.log("Processing Amazon order:", orderId);
-
-        // if(orderId !== "303-8543379-1405916") {
-        //   continue;
-        // }
-        // console.log("🚀 ~ Found specific order:", amazonOrder);
 
         if (!buyerEmail) {
           console.log(`⚠️ Skipping order ${orderId} — no buyer email`);
@@ -251,13 +240,15 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
           if (Array.isArray(shopifyCustomer?.edges)) {
             shopifyCustomer = shopifyCustomer?.edges[0]?.node;
           }
+          console.log("🚀 ~ shopifyCustomer:", JSON.stringify(shopifyCustomer, null, 2));
           console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-          if (shopifyCustomer?.metafield?.value) {
-            console.log("🚚 Customer delivery_method metafield found:", shopifyCustomer?.metafield?.value);
+          if (shopifyCustomer?.deliveryMethod?.value && shopifyCustomer?.blacklisted?.value != "true") {
+            console.log("🚚 Customer delivery_method metafield found:", shopifyCustomer?.deliveryMethod?.value);
+            console.log("🚚 Customer blacklisted metafield found true:", shopifyCustomer?.blacklisted?.value);
             shippingLines = [
               {
-                title: shopifyCustomer?.metafield?.value,
-                code: shopifyCustomer?.metafield?.value,
+                title: shopifyCustomer?.deliveryMethod?.value,
+                code: shopifyCustomer?.deliveryMethod?.value,
                 priceSet: {
                   shopMoney: {
                     amount: "0.0",
@@ -278,15 +269,9 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             const orders = customerOrdersResp?.orders || [];
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
-            if (orders.length >= 2) {
+            if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
               // finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
               finalDeliveryMethod = "coils";
-              customers.push({
-                firstName: shopifyCustomer?.firstName,
-                lastName: shopifyCustomer?.lastName,
-                email: shopifyCustomer?.email,
-                deliveryMethod: finalDeliveryMethod,
-              });
               shippingLines = [
                 {
                   title: finalDeliveryMethod,
@@ -441,55 +426,6 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
       await sleep(5); // 5 seconds between page
     }
-
-    // if (customers.length > 0) {
-    //   console.log(`✅ Found ${customers.length} customers to process.`);
-
-    //   const outputPath = path.resolve(process.cwd(), "customers.csv");
-    //   const ws = fs.createWriteStream(outputPath);
-    //   const csvStream = csv.format({
-    //     headers: [
-    //       "firstName",
-    //       "lastName",
-    //       "email",
-    //       "deliveryMethod",
-    //     ]
-    //   });
-
-    //   csvStream
-    //     .pipe(ws)
-    //     .on("finish", async () => {
-    //       console.log("✅ CSV created at:", outputPath);
-
-    //       try {
-    //         await sendEmail(
-    //           EmailsForCustomers,
-    //           "Shopify Customers Delivery Methods",
-    //           "Attached is the customers CSV.",
-    //           [{ filename: "customers.csv", path: outputPath }]
-    //         );
-
-    //         console.log("📨 Email sent with CSV attachment");
-    //       } catch (emailError) {
-    //         console.error("❌ Failed to send email:", emailError);
-    //       } finally {
-    //         fs.unlink(outputPath, (err) => {
-    //           if (err) {
-    //             console.error("❌ Failed to delete CSV:", err);
-    //           } else {
-    //             console.log("🗑️ CSV file deleted successfully");
-    //           }
-    //         });
-    //       }
-    //     })
-    //     .on("error", console.error);
-
-    //   // ✍️ Write all customers
-    //   for (let i = 0; i < customers.length; i++) {
-    //     csvStream.write(customers[i]);
-    //   }
-    //   csvStream.end();
-    // }
 
     console.log("✅ All pages processed successfully.");
     console.log(`📊 Total Amazon Orders Imported: ${totalImportCount}`);

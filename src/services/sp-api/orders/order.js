@@ -38,7 +38,7 @@ const fetchAmazonFBMOrdersPage = async ({ nextToken, lastUpdatedAfter }) => {
         LastUpdatedAfter: lastUpdatedAfter,
         FulfillmentChannels: ['MFN'],
         OrderStatuses: ['Unshipped'],
-        // AmazonOrderIds: ["304-4532357-7410734"],
+        // AmazonOrderIds: ["302-5234022-6841118"],
         MaxResultsPerPage: 100,
       };
     }
