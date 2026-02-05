@@ -7,5 +7,6 @@ import confirmShipment from "./ConfirmShipment";
 import packageDetail from "./PackageDetail";
 import settings from "./setting"
 import ProductHealthStats from "./productHealthStats"
+import Customer from "./Customer"
 
-export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail, settings, ProductHealthStats };
+export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail, settings, ProductHealthStats, Customer };

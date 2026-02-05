@@ -2,7 +2,7 @@ import moment from "moment";
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
 import { getMostUsedDeliveryMethod, sleep } from "../../helper/helper";
-import { createCustomer, getCustomerByEmail, updateCustomerMetafield } from "../../services/shopify/customer";
+import { createCustomer, getCustomerByEmail, saveCustomerToDB, updateCustomerMetafield } from "../../services/shopify/customer";
 import { checkShopifyOrder, createShopifyOrder, getShopifyOrdersByCustomerEmail, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
 import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
@@ -208,6 +208,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
 
         let shopifyCustomer = await getCustomerByEmail(buyerEmail);
         await sleep(5); // 5 seconds
+        let finalDeliveryMethod = null;
 
         if (!shopifyCustomer) {
           const newCustomerPayload = {
@@ -258,7 +259,6 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
               },
             ];
           } else {
-            let finalDeliveryMethod = null;
             console.log("⚠️ No customer delivery_method metafield found:");
             const customerOrdersResp = await getShopifyOrdersByCustomerEmail(buyerEmail);
 
@@ -303,6 +303,14 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.log("🚚 Final delivery method:", finalDeliveryMethod);
           }
         }
+        // 🔐 Persist customer in local DB
+        console.log("🔐 Saving customer to local DB with delivery method:", JSON.stringify(shopifyCustomer, null, 2));
+        await saveCustomerToDB({
+          ...shopifyCustomer,
+          deliveryMethod: {
+            value: shopifyCustomer?.deliveryMethod?.value || finalDeliveryMethod || null,
+          },
+        });
         const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
         console.log("🚀 ~ shippingAddressForOrder:", shippingAddressForOrder)
 

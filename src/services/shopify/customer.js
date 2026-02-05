@@ -1,4 +1,6 @@
 import GetGrapqlClient from "./graphql-client";
+import DB from "../../database";
+import { mapShopifyCustomerToDB } from "../../utils/generators";
 
 const getCustomerByEmail = async (email) => {
   try {
@@ -258,10 +260,19 @@ const updateCustomerMetafield = async (input) => {
   }
 };
 
+const saveCustomerToDB = async (shopifyCustomer) => {
+  if (!shopifyCustomer?.id) return;
+
+  const payload = mapShopifyCustomerToDB(shopifyCustomer);
+
+  await DB.customers.upsert(payload);
+};
+
 
 export {
   createCustomer,
   getAllCustomers,
+  saveCustomerToDB,
   getCustomerByEmail,
   updateCustomerMetafield
 };
