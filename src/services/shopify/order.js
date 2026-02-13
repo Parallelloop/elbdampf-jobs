@@ -254,6 +254,7 @@ const getShopifyOrdersByCustomerEmail = async (
               name
               email
               createdAt
+              processedAt
               shippingLine {
                 title
                 price

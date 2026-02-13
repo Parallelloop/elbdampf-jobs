@@ -270,8 +270,22 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
             if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
-              // finalDeliveryMethod = getMostUsedDeliveryMethod(orders);
-              finalDeliveryMethod = "coils";
+             
+              const sortedOrders = orders.sort(
+                (a, b) => new Date(a?.node?.processedAt) - new Date(b?.node?.processedAt)
+              );
+              
+              // console.log("🚀 ~ sortedOrders:", JSON.stringify(sortedOrders, null, 2)):
+              const firstOrderDate = new Date(sortedOrders[0]?.node?.processedAt);
+              const fourWeeksAgo = moment().subtract(4, "weeks").toDate();
+
+              const qualifiesForCoil = firstOrderDate <= fourWeeksAgo;
+              if (qualifiesForCoil) {
+                finalDeliveryMethod = "coils";
+              } else {
+                finalDeliveryMethod = finalTag;
+              }
+
               shippingLines = [
                 {
                   title: finalDeliveryMethod,
