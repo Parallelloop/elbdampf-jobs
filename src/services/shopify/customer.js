@@ -157,6 +157,81 @@ const getAllCustomers = async () => {
   }
 };
 
+const getAllCustomersForDB = async () => {
+  try {
+    const client = GetGrapqlClient({ scopes: ["read_customers"] });
+
+    let allCustomers = [];
+    let hasNextPage = true;
+    let cursor = null;
+
+    while (hasNextPage) {
+      const response = await client.request(
+        `
+        query GetCustomers($query: String!, $cursor: String) {
+          customers(first: 250, after: $cursor, query: $query) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              cursor
+              node {
+                id
+                email
+                firstName
+                lastName
+                createdAt
+                updatedAt
+                numberOfOrders
+                metafield(namespace: "custom", key: "delivery_method") {
+                  value
+                }
+              }
+            }
+          }
+        }
+        `,
+        {
+          variables: {
+            query: "",
+            cursor,
+          },
+        }
+      );
+
+      const customersData = response?.customers || response?.data?.customers;
+
+      const customers = customersData?.edges?.map((e) => {
+        const node = e.node;
+        return {
+          shopifyCustomerId: node.id,
+          email: node.email,
+          firstName: node.firstName,
+          lastName: node.lastName,
+          deliveryMethod: node.metafield?.value || null,
+          numberOfOrders: node.numberOfOrders || 0,
+        };
+      }) || [];
+
+      allCustomers.push(...customers);
+
+      hasNextPage = customersData?.pageInfo?.hasNextPage;
+      cursor = customersData?.pageInfo?.endCursor;
+
+      console.log(
+        `📦 Fetched ${customers.length} customers, total so far: ${allCustomers.length}`
+      );
+    }
+
+    return allCustomers;
+  } catch (error) {
+    console.error("❌ Failed to fetch customers:", error);
+    throw error;
+  }
+};
+
+
 
 const createCustomer = async (input) => {
   try {
@@ -274,5 +349,6 @@ export {
   getAllCustomers,
   saveCustomerToDB,
   getCustomerByEmail,
-  updateCustomerMetafield
+  updateCustomerMetafield,
+  getAllCustomersForDB
 };
