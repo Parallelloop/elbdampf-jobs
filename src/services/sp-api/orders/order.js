@@ -70,7 +70,7 @@ const fetchAmazonFBMOrdersPagev2026 = async ({ nextToken, lastUpdatedAfter }) =>
       fulfilledBy: ["MERCHANT"],
       fulfillmentStatuses: ["UNSHIPPED"],
       // fulfillmentStatuses: ["SHIPPED"],
-      maxResultsPerPage: 5,
+      maxResultsPerPage: 100,
       includedData: [
         "BUYER",
         "PROCEEDS",
