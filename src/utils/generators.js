@@ -3,6 +3,12 @@ const clean = (val) => {
   return String(val).trim();
 };
 
+const appConfig = {
+  spApiNAEndpoint: 'https://sellingpartnerapi-na.amazon.com',
+  spApiEUEndpoint: 'https://sellingpartnerapi-eu.amazon.com',
+  spApiFEEndpoint: 'https://sellingpartnerapi-fe.amazon.com',
+};
+
 const mapDeliveryMethodToShopify = (methodTag) => {
   switch (methodTag) {
     case "EXPRESS":
@@ -84,5 +90,6 @@ export {
   mapDeliveryMethodToShopify,
   pickHigherPriority,
   normalizeListingItem,
-  mapShopifyCustomerToDB
+  mapShopifyCustomerToDB,
+  appConfig
 }

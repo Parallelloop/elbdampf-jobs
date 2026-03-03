@@ -5,7 +5,7 @@ import { getMostUsedDeliveryMethod, sleep } from "../../helper/helper";
 import { createCustomer, getCustomerByEmail, saveCustomerToDB, updateCustomerMetafield } from "../../services/shopify/customer";
 import { checkShopifyOrder, createShopifyOrder, getShopifyOrdersByCustomerEmail, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
-import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
+import { fetchAmazonFBMOrdersPagev2026 } from "../../services/sp-api/orders/order";
 import { JOB_STATES } from "../../utils/constants";
 import { clean } from "../../utils/generators";
 import { sendEmail } from "../../utils/send-email";
@@ -28,7 +28,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
     let nextToken = null;
     let pageCount = 0;
     while (true) {
-      const { amazonOrders, nextToken: newNextToken } = await fetchAmazonFBMOrdersPage({
+      const { amazonOrders, nextToken: newNextToken } = await fetchAmazonFBMOrdersPagev2026({
         nextToken,
         lastUpdatedAfter,
       });
@@ -36,32 +36,31 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
       if (!amazonOrders.length) {
         console.log("No new Amazon orders to process.");
       }
-      // console.log("🚀 ~ file: some-job.js:15 ~ Agenda.define ~ amazonOrders:", JSON.stringify(ordersList, null, 2));
+      // console.log("🚀 ~ file: some-job.js:15 ~ Agenda.define ~ amazonOrders:", JSON.stringify(amazonOrders, null, 2));
       pageCount++;
       console.log(`📦 Processing page #${pageCount} — Orders: ${amazonOrders.length}`);
 
       for (let i = 0; i < amazonOrders.length; i++) {
         const amazonOrder = amazonOrders[i];
         const shopifyLineItems = [];
-        const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
-        const orderId = amazonOrder?.AmazonOrderId;
-        const processedAt = amazonOrder?.PurchaseDate;
-        const shipping = amazonOrder?.ShippingAddress || {};
-        const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
-        const fullName = clean(shipping?.Name) || "";
+        const buyerEmail = amazonOrder?.buyer?.buyerEmail || null;
+        const orderId = amazonOrder?.orderId;
+        const processedAt = amazonOrder?.createdTime;
+        const shipping = amazonOrder?.recipient?.deliveryAddress || {};
+        const fullName = clean(shipping?.name) || "";
         const firstName = fullName.split(" ")[0] || "No Name";
         const lastName = fullName.split(" ").slice(1).join(" ") || fullName.split(" ")[0] || "No Name";
-        const isResidentialAddress = shipping?.AddressType == "Residential" || false;
+        const isResidentialAddress = shipping?.addressType == "RESIDENTIAL" || false;
         console.log("🚀 ~ isResidentialAddress:", isResidentialAddress)
 
         const address = {
-          address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine2) || clean(shipping?.AddressLine1) || "",
-          address2: isResidentialAddress ? clean(shipping?.AddressLine2) || "" : "",
-          company: isResidentialAddress ? "" : shipping?.AddressLine2 ? clean(shipping?.AddressLine1) || "" : "",
-          city: clean(shipping?.City) || clean(addressFrom?.City) || "",
-          countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
-          zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
-          phone: clean(shipping?.Phone) || clean(amazonOrder?.BuyerInfo?.BuyerPhone) || "",
+          address1: isResidentialAddress ? clean(shipping?.addressLine1) || "" : clean(shipping?.addressLine2) || clean(shipping?.addressLine1) || "",
+          address2: isResidentialAddress ? clean(shipping?.addressLine2) || "" : "",
+          company: isResidentialAddress ? "" : shipping?.addressLine2 ? clean(shipping?.addressLine1) || "" : "",
+          city: clean(shipping?.city) || "",
+          countryCode: clean(shipping?.countryCode) || "DE",
+          zip: clean(shipping?.postalCode) || "",
+          phone: clean(shipping?.phone) || "",
         };
         console.log("🚀 ~ address:", address)
         console.log("Processing Amazon order:", orderId);
@@ -80,25 +79,26 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         if (!dbOrder) {
           dbOrder = await DB.orders.create({
             orderId: orderId,
-            orderStatus: amazonOrder.OrderStatus,
-            purchaseDate: amazonOrder.PurchaseDate,
+            orderStatus: "UNSHIPPED",
+            purchaseDate: amazonOrder?.createdTime
+              ? new Date(amazonOrder.createdTime)?.toISOString()
+              : "",
             isPosted: false,
             buyerEmail: buyerEmail,
             buyerName: fullName,
             addressLine1: address?.address1 || "",
             addressLine2: address?.address2 || "",
             city: address?.city || "",
-            stateOrRegion: shipping?.StateOrRegion || "",
+            stateOrRegion: shipping?.stateOrRegion || "",
             postalCode: address?.zip || "",
             countryCode: address?.countryCode || "",
-            addressType: shipping?.AddressType || "",
+            addressType: shipping?.addressType || "",
             orderErrors: null,
           });
           console.log(`💾 Saved new Amazon order in DB: ${orderId}`);
         }
 
-        const amazonItemsResp = await fetchAmazonOrderItems(orderId);
-        const amazonOrderItems = amazonItemsResp?.OrderItems || [];
+        const amazonOrderItems = amazonOrder?.orderItems || [];
         let subtotal = 0;
         let taxTotal = 0;
         let deliveryMethodTag = null;
@@ -106,9 +106,10 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         let skipOrder = false;
         for (let j = 0; j < amazonOrderItems.length; j++) {
           const item = amazonOrderItems[j];
+          const amazonProduct = item?.product;
 
-          const sku = item?.SellerSKU;
-          const asin = item?.ASIN || null;
+          const sku = amazonProduct?.sellerSku;
+          const asin = amazonProduct?.asin || null;
           console.log("🚀 ~ sku:", sku);
           console.log("🚀 ~ asin:", asin);
           const productRecord = await DB.products.findOne({
@@ -124,7 +125,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             currentPriority = priorityFromProduct;
           }
 
-          const qty = item?.QuantityOrdered || 1;
+          const qty = item?.quantityOrdered || 1;
 
           const variantResult = await findVariantProduct({ query: sku });
           if (!variantResult.success || variantResult.variants.length === 0) {
@@ -132,16 +133,17 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             skipOrder = true;
             break; // stop processing items
           }
-          const totalItemPrice = parseFloat(item?.ItemPrice?.Amount || 0);
-          const taxRate = 0.19;
+          const grossTotal = parseFloat(item?.proceeds?.proceedsTotal?.amount || 0);
+          const VAT_RATE = 0.19;
+          // VAT included calculation
+          const taxAmount = grossTotal * (VAT_RATE / (1 + VAT_RATE));
+          const netTotal = grossTotal - taxAmount;
+          const netUnitPrice = qty > 0 ? netTotal / qty : 0;
+          const currencyCode = amazonProduct?.price?.unitPrice?.currencyCode;
 
-          const taxAmount = totalItemPrice * (taxRate / (1 + taxRate));
-          const netTotalPrice = totalItemPrice - taxAmount;
-
-          const variant = variantResult.variants[0];
-          const unitPrice = qty > 0 ? netTotalPrice / qty : 0;
-          subtotal += netTotalPrice;
+          subtotal += netTotal;
           taxTotal += taxAmount;
+          const variant = variantResult.variants[0];
 
           shopifyLineItems.push({
             variantId: variant.id,
@@ -151,19 +153,19 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             requiresShipping: true,
             priceSet: {
               shopMoney: {
-                amount: unitPrice.toFixed(2),
-                currencyCode: item.ItemPrice?.CurrencyCode || "EUR"
+                amount: netUnitPrice.toFixed(2),
+                currencyCode: currencyCode || "EUR"
               }
             },
             sku: sku,
             taxLines: [
               {
                 title: "VAT",
-                rate: taxRate,
+                rate: VAT_RATE,
                 priceSet: {
                   shopMoney: {
                     amount: taxAmount.toFixed(2),
-                    currencyCode: item?.ItemTax?.CurrencyCode || "EUR"
+                    currencyCode: currencyCode || "EUR"
                   }
                 }
               }
@@ -213,12 +215,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
         if (!shopifyCustomer) {
           const newCustomerPayload = {
             email: buyerEmail,
-            phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
-            firstName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[0] || "Amazon",
-            lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
+            phone: shipping?.phone || null,
+            firstName: amazonOrder?.buyer?.buyerName?.split(" ")[0] || "Amazon",
+            lastName: amazonOrder?.buyer?.buyerName?.split(" ")[1] || "Customer",
             addresses: [address],
             taxExempt: false,
-            ...(amazonOrder?.BuyerInfo?.BuyerPhone
+            ...(shipping?.phone
               ? {
                 smsMarketingConsent: {
                   marketingState: "NOT_SUBSCRIBED",
@@ -270,11 +272,11 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
             if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
-             
+
               const sortedOrders = orders.sort(
                 (a, b) => new Date(a?.node?.processedAt) - new Date(b?.node?.processedAt)
               );
-              
+
               // console.log("🚀 ~ sortedOrders:", JSON.stringify(sortedOrders, null, 2)):
               const firstOrderDate = new Date(sortedOrders[0]?.node?.processedAt);
               const fourWeeksAgo = moment().subtract(4, "weeks").toDate();
