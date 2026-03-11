@@ -3,7 +3,7 @@ import GetGrapqlClient from "./graphql-client";
 const createShopifyOrder = async (orderData) => {
   try {
     const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
-    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLines } = orderData;
+    const { lineItems, shippingAddress, amazonOrderId, buyerEmail, totalAmount, shippingLines, processedAt, customerId } = orderData;
 
     const mutation = `
           mutation orderCreate(
@@ -52,12 +52,20 @@ const createShopifyOrder = async (orderData) => {
 
     const variables = {
       order: {
+        ...(customerId && {
+          customer: {
+            toAssociate: {
+              id: customerId,
+            },
+          },
+        }),
         email: buyerEmail,
         lineItems: lineItems,
         shippingAddress: shippingAddress || null,
         billingAddress: shippingAddress || null,
         note: `Imported from Amazon Order ID: ${amazonOrderId}`,
-        financialStatus: "PAID",
+        processedAt: processedAt,
+        financialStatus: "PENDING",
         tags: [`Amazon`],
         customAttributes: [
           { key: "Amazon Order ID", value: String(amazonOrderId) },
@@ -71,7 +79,7 @@ const createShopifyOrder = async (orderData) => {
         {
           kind: "SALE",
           status: "SUCCESS",
-          gateway: "Amazon",
+          gateway: "manual",
           amountSet: {
             shopMoney: {
               amount: totalAmount,
@@ -80,7 +88,9 @@ const createShopifyOrder = async (orderData) => {
           },
         },
       ],
-      options: null
+      options: {
+        inventoryBehaviour: "DECREMENT_OBEYING_POLICY",
+      }
     };
 
     const response = await graphClient.request(mutation, { variables });
@@ -97,6 +107,69 @@ const createShopifyOrder = async (orderData) => {
     return { success: false, error: error.message };
   }
 };
+
+const shopifyOrderMarkAsPaid = async (shopifyOrderId) => {
+  try {
+    const graphClient = GetGrapqlClient({ scopes: ["write_orders"] });
+
+    const mutation = `
+      mutation orderMarkAsPaid($input: OrderMarkAsPaidInput!) {
+        orderMarkAsPaid(input: $input) {
+          userErrors {
+            field
+            message
+          }
+          order {
+            id
+            name
+            canMarkAsPaid
+            displayFinancialStatus
+            totalOutstandingSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            transactions(first: 10) {
+              id
+              kind
+              status
+              gateway
+              amountSet {
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+              createdAt
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      input: {
+        id: shopifyOrderId,
+      },
+    };
+
+    const response = await graphClient.request(mutation, { variables });
+    // console.log("🚀 ~ shopifyOrderMarkAsPaid ~ response:", JSON.stringify(response, null, 2));
+
+    const { userErrors, order } = response?.data?.orderMarkAsPaid || {};
+
+    if (userErrors?.length) {
+      return { success: false, errors: userErrors };
+    }
+
+    return { success: true, order };
+  } catch (error) {
+    console.error("❌ Shopify order Mark as Paid failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 
 const checkShopifyOrder = async (amazonOrderId, email) => {
   try {
@@ -160,6 +233,54 @@ const checkShopifyOrder = async (amazonOrderId, email) => {
   }
 };
 
+const getShopifyOrdersByCustomerEmail = async (
+  email,
+  status = "paid",
+  limit = 250
+) => {
+  try {
+    if (!email) {
+      return { success: false, error: "No email provided" };
+    }
+
+    const client = GetGrapqlClient({ scopes: ["read_orders"] });
+
+    const query = `
+      query Orders($query: String!, $first: Int!) {
+        orders(first: $first, query: $query) {
+          edges {
+            node {
+              id
+              name
+              email
+              createdAt
+              processedAt
+              shippingLine {
+                title
+                price
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+      query: `email:${email} financial_status:${status} -cancelled_at:*`,
+      first: limit
+    };
+
+    const response = await client.request(query, { variables });
+
+    const orders = response?.data?.orders?.edges || [];
+
+    return { success: true, orders };
+  } catch (error) {
+    console.error("❌ Failed to fetch Shopify orders:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
 const getShopifyOrder = async (shopifyOrderId) => {
   try {
     if (!shopifyOrderId) {
@@ -218,5 +339,7 @@ const getShopifyOrder = async (shopifyOrderId) => {
 export {
   createShopifyOrder,
   checkShopifyOrder,
-  getShopifyOrder
+  getShopifyOrder,
+  shopifyOrderMarkAsPaid,
+  getShopifyOrdersByCustomerEmail
 }

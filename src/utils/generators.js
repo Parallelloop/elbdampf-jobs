@@ -62,9 +62,27 @@ const normalizeListingItem = (item) => {
   };
 };
 
+const mapShopifyCustomerToDB = (shopifyCustomer) => {
+  return {
+    shopifyCustomerId: shopifyCustomer.id,
+    email: shopifyCustomer.email || null,
+    firstName: shopifyCustomer.firstName || null,
+    lastName: shopifyCustomer.lastName || null,
+    deliveryMethod: shopifyCustomer.deliveryMethod?.value || null,
+    blacklisted:
+      shopifyCustomer.blacklisted?.value == "true"
+        ? true
+        : false,
+
+    numberOfOrders: Number(shopifyCustomer?.numberOfOrders || 0),
+  };
+};
+
+
 export {
   clean,
   mapDeliveryMethodToShopify,
   pickHigherPriority,
-  normalizeListingItem
+  normalizeListingItem,
+  mapShopifyCustomerToDB
 }

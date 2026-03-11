@@ -23,7 +23,11 @@ const DeliveryMethods = (sequelize, DataTypes) => {
 				allowNull: false,
 				unique: true,
 			},
-
+			priority: {
+				type: DataTypes.INTEGER,
+				allowNull: false,
+				defaultValue: 99,
+			},
 			status: {
 				type: DataTypes.ENUM("ACTIVE", "INACTIVE"),
 				defaultValue: "ACTIVE",

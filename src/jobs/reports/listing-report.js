@@ -7,6 +7,7 @@ import { downloadDocument, getReport, getReportDocument, getReportId } from "../
 import { parseTSV } from "../../utils/parse";
 import getListingsItem from "../../services/sp-api/listings/get-listings-item";
 import { normalizeListingItem } from "../../utils/generators";
+import { sendEmail } from "../../utils/send-email";
 
 const bulkSaveSequelize = async (data) => {
     try {
@@ -15,20 +16,23 @@ const bulkSaveSequelize = async (data) => {
         const productBulk = [];
         const skuToInventory = new Map();
 
-        for (const item of data) {
+        for (let i = 0; i < data.length; i++) {
+            const item = data[i];
+
             productBulk.push({
                 sku: item.sku,
                 asin: item.asin,
                 title: item.title,
                 image: item.image,
                 status: item.status,
+                productType: item.productType,
                 shippingMethod: item.shippingMethod,
             });
             skuToInventory.set(item.sku, item.inventory);
         }
 
         await DB.products.bulkCreate(productBulk, {
-            updateOnDuplicate: ["asin", "title", "image", "status", "shippingMethod", "updatedAt"],
+            updateOnDuplicate: ["productType", "asin", "title", "image", "status", "shippingMethod", "updatedAt"],
         });
 
         const products = await DB.products.findAll({
@@ -76,6 +80,9 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                     const report = await downloadDocument({ client, reportData });
                     if (report) {
                         const reportJson = await parseTSV(report);
+                        let total = 0;
+                        let mapped = 0;
+                        let unmapped = 0;
                         console.log("🚀 ~ reportJson:", reportJson.length)
                         // console.log("🚀 ~ reportJson:", JSON.stringify(reportJson, null, 2));
                         const existingProducts = await DB.products.findAll({
@@ -92,15 +99,25 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                         for (let rawItem of reportJson) {
                             console.log("🚀 ~ item:", JSON.stringify(rawItem, null, 2));
                             const { sku, status, title, asin, fulfillmentChannel, quantity } = normalizeListingItem(rawItem);
-                            if (existingSkus.has(sku)) continue;
+                            if (sku && asin && status === "Active") {
+                                mapped++;
+                            } else {
+                                unmapped++;
+                            }
+                            // if (existingSkus.has(sku)) continue;
                             console.log("🚀 ~ sku:", sku)
                             const fulfillmentType = fulfillmentChannel === "DEFAULT" ? "FBM" : "FBA";
 
                             const listingInfo = await getListingsItem({ client, sku });
                             // console.log("🚀 ~ listingInfo:", JSON.stringify(listingInfo, null, 2));
-                            let image = "";
+
+                            if (!listingInfo) {
+                                continue;
+                            }
+
                             const summary = listingInfo.summaries?.[0] || {};
-                            image = summary.mainImage?.link || "";
+                            const productType = summary.productType || "";
+                            const image = summary.mainImage?.link || "";
 
                             data.push({
                                 status,
@@ -110,8 +127,21 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
                                 asin,
                                 inventory: quantity,
                                 shippingMethod: fulfillmentType,
+                                productType,
                             });
+                            total++;
                         }
+                        const mappedPercentage = total ? Math.round((mapped / total) * 100) : 0;
+                        const unmappedPercentage = 100 - mappedPercentage;
+                        await DB.productHealthStats.upsert({
+                            id: 1, // single-row pattern
+                            totalProducts: total,
+                            mappedProducts: mapped,
+                            unmappedProducts: unmapped,
+                            mappedPercentage,
+                            unmappedPercentage,
+                            lastSyncedAt: new Date(),
+                        });
                         await bulkSaveSequelize(data);
                         job.attrs.data.reportId = null;
                         await job.save();
@@ -135,6 +165,13 @@ Agenda.define("listing-report", { concurrency: 1, lockLifetime: 60 * 60000 }, as
         console.log(`reportId: ${reportId}`);
         console.log("*****************************************************************");
     } catch (error) {
+        const setting = await DB.settings.findOne({ where: { id: 1 } });
+        if (!setting) {
+            console.log("⚠️ No settings found");
+        }
+        if (setting?.emailOnErrors) {
+            await sendEmail(setting.errorEmails, "Urgent Jobs are Failing", `Listing Report Sync Job is failing, error: ${error.message}`);
+        }
         console.log("*****************************************************************");
         console.log("********************    Fetch Listing Report RETRY   *******************");
         console.log("*****************************************************************");

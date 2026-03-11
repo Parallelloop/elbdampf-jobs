@@ -1,21 +1,29 @@
+import moment from "moment";
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
-import Orders from "../../database/models/orders";
-import { getCustomerMetafield, sleep } from "../../helper/helper";
-import { createCustomer, getCustomerByEmail } from "../../services/shopify/customer";
-import { checkShopifyOrder, createShopifyOrder } from "../../services/shopify/order";
+import { getMostUsedDeliveryMethod, sleep } from "../../helper/helper";
+import { createCustomer, getCustomerByEmail, saveCustomerToDB, updateCustomerMetafield } from "../../services/shopify/customer";
+import { checkShopifyOrder, createShopifyOrder, getShopifyOrdersByCustomerEmail, shopifyOrderMarkAsPaid } from "../../services/shopify/order";
 import { findVariantProduct } from "../../services/shopify/product";
-import { fetchAmazonFBMOrders, fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
-import { DELIVERY_KEY, DELIVERY_NAMESPACE, JOB_STATES } from "../../utils/constants";
-import { clean, mapDeliveryMethodToShopify, pickHigherPriority } from "../../utils/generators";
+import { fetchAmazonFBMOrdersPage, fetchAmazonOrderItems } from "../../services/sp-api/orders/order";
+import { JOB_STATES } from "../../utils/constants";
+import { clean } from "../../utils/generators";
+import { sendEmail } from "../../utils/send-email";
 
-
-Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000 }, async (job, done) => {
+Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
   console.log("*********************************************************");
   console.log("*****************   Push Orders Shopify Job    *******************");
   console.log("*********************************************************");
   try {
-    const lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter || new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+    let totalImportCount = 0;
+    let lastUpdatedAfter = job.attrs.data?.lastUpdatedAfter;
+    if (lastUpdatedAfter) {
+      lastUpdatedAfter = moment(lastUpdatedAfter).subtract(15, 'minutes').toISOString();
+    } else {
+      lastUpdatedAfter = moment().subtract(1, 'day').toISOString();
+    }
+    const currentTime = new Date();
+
     console.log("🚀 ~ lastUpdatedAfter:", lastUpdatedAfter)
     let nextToken = null;
     let pageCount = 0;
@@ -32,29 +40,31 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
       pageCount++;
       console.log(`📦 Processing page #${pageCount} — Orders: ${amazonOrders.length}`);
 
-      for (const amazonOrder of amazonOrders) {
+      for (let i = 0; i < amazonOrders.length; i++) {
+        const amazonOrder = amazonOrders[i];
         const shopifyLineItems = [];
         const buyerEmail = amazonOrder?.BuyerInfo?.BuyerEmail || null;
         const orderId = amazonOrder?.AmazonOrderId;
+        const processedAt = amazonOrder?.PurchaseDate;
         const shipping = amazonOrder?.ShippingAddress || {};
         const addressFrom = amazonOrder?.DefaultShipFromLocationAddress || {};
         const fullName = clean(shipping?.Name) || "";
-        const firstName = fullName.split(" ")[0] || "";
-        const lastName = fullName.split(" ").slice(1).join(" ") || "";
+        const firstName = fullName.split(" ")[0] || "No Name";
+        const lastName = fullName.split(" ").slice(1).join(" ") || fullName.split(" ")[0] || "No Name";
+        const isResidentialAddress = shipping?.AddressType == "Residential" || false;
+        console.log("🚀 ~ isResidentialAddress:", isResidentialAddress)
+
         const address = {
-          address1: clean(shipping?.AddressLine1) || "",
-          address2: clean(shipping?.AddressLine2) || "",
+          address1: isResidentialAddress ? clean(shipping?.AddressLine1) || "" : clean(shipping?.AddressLine2) || clean(shipping?.AddressLine1) || "",
+          address2: isResidentialAddress ? clean(shipping?.AddressLine2) || "" : "",
+          company: isResidentialAddress ? "" : shipping?.AddressLine2 ? clean(shipping?.AddressLine1) || "" : "",
           city: clean(shipping?.City) || clean(addressFrom?.City) || "",
           countryCode: clean(shipping?.CountryCode) || clean(addressFrom?.CountryCode) || "DE",
           zip: clean(shipping?.PostalCode) || clean(addressFrom?.PostalCode) || "",
           phone: clean(shipping?.Phone) || clean(amazonOrder?.BuyerInfo?.BuyerPhone) || "",
         };
+        console.log("🚀 ~ address:", address)
         console.log("Processing Amazon order:", orderId);
-
-        // if(orderId !== "303-8543379-1405916") {
-        //   continue;
-        // }
-        // console.log("🚀 ~ Found specific order:", amazonOrder);
 
         if (!buyerEmail) {
           console.log(`⚠️ Skipping order ${orderId} — no buyer email`);
@@ -92,9 +102,11 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         let subtotal = 0;
         let taxTotal = 0;
         let deliveryMethodTag = null;
+        let currentPriority = 0;
         let skipOrder = false;
-        for (const item of amazonOrderItems) {
-          const itemTax = parseFloat(item?.ItemTax?.Amount || 0);
+        for (let j = 0; j < amazonOrderItems.length; j++) {
+          const item = amazonOrderItems[j];
+
           const sku = item?.SellerSKU;
           const asin = item?.ASIN || null;
           console.log("🚀 ~ sku:", sku);
@@ -106,50 +118,57 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           console.log("🚀 ~ productRecord:", JSON.stringify(productRecord, null, 2));
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
-          deliveryMethodTag = pickHigherPriority(
-            deliveryMethodTag,
-            tagFromProduct
-          );
+          const priorityFromProduct = productRecord?.deliveryMethod?.priority || 0;
+
+          if (!deliveryMethodTag || priorityFromProduct < currentPriority) {
+            deliveryMethodTag = tagFromProduct;
+            currentPriority = priorityFromProduct;
+          }
+
           const qty = item?.QuantityOrdered || 1;
+
           const variantResult = await findVariantProduct({ query: sku });
           if (!variantResult.success || variantResult.variants.length === 0) {
             console.warn(`❌ SKU not found on Shopify. Skipping entire order ${orderId}. SKU: ${sku}`);
             skipOrder = true;
             break; // stop processing items
           }
-          const price = parseFloat(item?.ItemPrice?.Amount || variant?.price || 0);
+          const totalItemPrice = parseFloat(item?.ItemPrice?.Amount || 0);
+          const taxRate = 0.19;
+
+          const taxAmount = totalItemPrice * (taxRate / (1 + taxRate));
+          const netTotalPrice = totalItemPrice - taxAmount;
+
           const variant = variantResult.variants[0];
-          subtotal += price * qty;
-          taxTotal += itemTax;
+          const unitPrice = qty > 0 ? netTotalPrice / qty : 0;
+          subtotal += netTotalPrice;
+          taxTotal += taxAmount;
 
           shopifyLineItems.push({
             variantId: variant.id,
-            variantTitle: variant.title || "Variant Item",
+            variantTitle: item.Title || variant.title || "Variant Item",
             quantity: qty,
-            title: item.Title || "Product Item",
+            title: item.Title || variant.title || "Product Item",
             requiresShipping: true,
             priceSet: {
               shopMoney: {
-                amount: price,
+                amount: unitPrice.toFixed(2),
                 currencyCode: item.ItemPrice?.CurrencyCode || "EUR"
               }
             },
             sku: sku,
-            taxLines: itemTax ? [
+            taxLines: [
               {
                 title: "VAT",
-                rate:
-                  parseFloat(itemTax) /
-                  parseFloat(price || 1),
+                rate: taxRate,
                 priceSet: {
                   shopMoney: {
-                    amount: parseFloat(itemTax),
-                    currencyCode: item?.ItemTax?.CurrencyCode
+                    amount: taxAmount.toFixed(2),
+                    currencyCode: item?.ItemTax?.CurrencyCode || "EUR"
                   }
                 }
               }
             ]
-              : []
           });
 
           if (shopifyLineItems.length === 0) {
@@ -170,13 +189,29 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           continue; // move to next Amazon order
         }
 
-        let selectedDeliveryMethod = null;
-        let finalDeliveryMethod = "STANDARD";
+        const finalTag = deliveryMethodTag || "standard";
+
+        console.log("🚀 ~ finalTag:", finalTag)
+
+        let shippingLines = [
+          {
+            title: finalTag,
+            code: finalTag,
+            priceSet: {
+              shopMoney: {
+                amount: "0.0",
+                currencyCode: "EUR",
+              },
+            },
+          },
+        ];
+        const totalAmount = subtotal + taxTotal;
 
         let shopifyCustomer = await getCustomerByEmail(buyerEmail);
         await sleep(5); // 5 seconds
+        let finalDeliveryMethod = null;
+
         if (!shopifyCustomer) {
-          finalDeliveryMethod = deliveryMethodTag || "STANDARD";
           const newCustomerPayload = {
             email: buyerEmail,
             phone: shipping?.Phone || amazonOrder?.BuyerInfo?.BuyerPhone || null,
@@ -184,14 +219,6 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             lastName: amazonOrder?.BuyerInfo?.BuyerName?.split(" ")[1] || "Customer",
             addresses: [address],
             taxExempt: false,
-            metafields: [
-              {
-                namespace: DELIVERY_NAMESPACE,
-                key: DELIVERY_KEY,
-                type: "json",
-                value: JSON.stringify([finalDeliveryMethod])
-              }
-            ],
             ...(amazonOrder?.BuyerInfo?.BuyerPhone
               ? {
                 smsMarketingConsent: {
@@ -201,6 +228,7 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
               }
               : {}),
           };
+
           shopifyCustomer = await createCustomer(newCustomerPayload);
           if (shopifyCustomer?.success) {
             shopifyCustomer = shopifyCustomer.customer;
@@ -209,48 +237,117 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             console.error("❌ Failed to create Shopify customer", shopifyCustomer?.errors, ` for Amazon order ${orderId}`);
           }
           await sleep(5); // 5 seconds
+          await job.touch();
         } else {
           if (Array.isArray(shopifyCustomer?.edges)) {
             shopifyCustomer = shopifyCustomer?.edges[0]?.node;
           }
-
-          console.log("🚀 ~ shopifyCustomer: here", JSON.stringify(shopifyCustomer, null, 2));
-          let deliveryMetafield = getCustomerMetafield(
-            shopifyCustomer,
-            DELIVERY_NAMESPACE,
-            DELIVERY_KEY
-          );
-
-          if (deliveryMetafield?.value) {
-              const parsed = JSON.parse(deliveryMetafield.value);
-              finalDeliveryMethod = parsed?.[0] || "STANDARD";
-          }
-          console.log("✅ Using existing delivery method:", finalDeliveryMethod);
-          console.log("🚀 ~ deliveryMetafield:", deliveryMetafield);
+          console.log("🚀 ~ shopifyCustomer:", JSON.stringify(shopifyCustomer, null, 2));
           console.log(`ℹ️ Existing Shopify customer: ${shopifyCustomer?.id} (${buyerEmail})`);
-        }
-        const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
-
-        selectedDeliveryMethod = mapDeliveryMethodToShopify(finalDeliveryMethod);
-        const shippingLines = selectedDeliveryMethod
-          ? [
-            {
-              title: selectedDeliveryMethod.title,
-              code: selectedDeliveryMethod.code,
-              priceSet: {
-                shopMoney: {
-                  amount: selectedDeliveryMethod.price,
-                  currencyCode: "EUR",
+          if (shopifyCustomer?.deliveryMethod?.value && shopifyCustomer?.blacklisted?.value != "true") {
+            console.log("🚚 Customer delivery_method metafield found:", shopifyCustomer?.deliveryMethod?.value);
+            console.log("🚚 Customer blacklisted metafield found true:", shopifyCustomer?.blacklisted?.value);
+            shippingLines = [
+              {
+                title: shopifyCustomer?.deliveryMethod?.value,
+                code: shopifyCustomer?.deliveryMethod?.value,
+                priceSet: {
+                  shopMoney: {
+                    amount: "0.0",
+                    currencyCode: "EUR",
+                  },
                 },
               },
-            },
-          ]
-          : [];
-        const totalAmount = subtotal + taxTotal;
+            ];
+          } else {
+            console.log("⚠️ No customer delivery_method metafield found:");
+            const customerOrdersResp = await getShopifyOrdersByCustomerEmail(buyerEmail);
+
+            if (!customerOrdersResp?.success) {
+              console.log("⚠️ Could not fetch customer orders");
+            }
+
+            const orders = customerOrdersResp?.orders || [];
+            console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
+
+            if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
+             
+              const sortedOrders = orders.sort(
+                (a, b) => new Date(a?.node?.processedAt) - new Date(b?.node?.processedAt)
+              );
+              
+              // console.log("🚀 ~ sortedOrders:", JSON.stringify(sortedOrders, null, 2)):
+              const firstOrderDate = new Date(sortedOrders[0]?.node?.processedAt);
+              const fourWeeksAgo = moment().subtract(4, "weeks").toDate();
+
+              const qualifiesForCoil = firstOrderDate <= fourWeeksAgo;
+              if (qualifiesForCoil) {
+                finalDeliveryMethod = "coils";
+              } else {
+                finalDeliveryMethod = finalTag;
+              }
+
+              shippingLines = [
+                {
+                  title: finalDeliveryMethod,
+                  code: finalDeliveryMethod,
+                  priceSet: {
+                    shopMoney: {
+                      amount: "0.0",
+                      currencyCode: "EUR",
+                    },
+                  },
+                },
+              ];
+              const setMetaFields = {
+                metafields: [
+                  {
+                    ownerId: shopifyCustomer?.id,
+                    namespace: "custom",
+                    key: "delivery_method",
+                    type: "single_line_text_field",
+                    value: finalDeliveryMethod
+                  }
+                ]
+              }
+              const updateMetaFieldResponse = await updateCustomerMetafield(setMetaFields);
+              if (!updateMetaFieldResponse?.success) {
+                console.log("⚠️ Could not update customer metafield");
+              }
+            }
+            console.log("🚚 Final delivery method:", finalDeliveryMethod);
+          }
+        }
+        // 🔐 Persist customer in local DB
+        console.log("🔐 Saving customer to local DB with delivery method:", JSON.stringify(shopifyCustomer, null, 2));
+        await saveCustomerToDB({
+          ...shopifyCustomer,
+          deliveryMethod: {
+            value: shopifyCustomer?.deliveryMethod?.value || finalDeliveryMethod || null,
+          },
+        });
+        const shippingAddressForOrder = address ? { firstName, lastName, ...address } : null;
+        console.log("🚀 ~ shippingAddressForOrder:", shippingAddressForOrder)
+
+        // 🔍 Check if Shopify order already exists for this Amazon Order
+        const existingOrderCheck = await checkShopifyOrder(orderId, buyerEmail);
+
+        if (existingOrderCheck?.success && existingOrderCheck?.edges?.length > 0) {
+          console.log(`⏩ Shopify order already exists for Amazon order ${orderId}. Skipping import.`);
+
+          await DB.orders.update(
+            { isPosted: true, orderErrors: null },
+            { where: { orderId } }
+          );
+
+          continue;
+        }
 
         const createOrderResp = await createShopifyOrder({
+          customerId: shopifyCustomer?.id,
           buyerEmail,
           totalAmount,
+          processedAt,
           lineItems: shopifyLineItems,
           shippingLines,
           shippingAddress: shippingAddressForOrder,
@@ -258,6 +355,12 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         });
 
         await sleep(5); // 5 seconds
+        await job.touch();
+
+        const setting = await DB.settings.findOne({ where: { id: 1 } });
+        if (!setting) {
+          console.warn(`⚠️ No settings found Email is not sending ${orderId}`);
+        }
 
         if (
           !createOrderResp?.success ||
@@ -280,6 +383,10 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
             errorMessage
           );
 
+          if (setting?.emailOnErrors) {
+            sendEmail(setting.errorEmails, "Shopify Order Creation Failed", `Amazon Order ${orderId}, Shopify Order creation failed with error ${errorMessage}`);
+          }
+
           continue; // DO NOT touch order.id
         }
 
@@ -288,7 +395,44 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
           continue;
         }
 
+        const shopifyOrderId = createOrderResp?.order?.id;
+
+        await sleep(2);
+        await job.touch();
+
+        // 💰 Mark order as paid
+        const markPaidResp = await shopifyOrderMarkAsPaid(shopifyOrderId);
+
+        if (!markPaidResp?.success) {
+          const paymentError =
+            markPaidResp?.errors
+              ?.map(e => e.message)
+              .join(", ") ||
+            markPaidResp?.error ||
+            "Failed to mark order as paid";
+
+          await DB.orders.update(
+            { orderErrors: paymentError },
+            { where: { orderId } }
+          );
+
+          console.error(
+            `❌ Failed to mark Shopify order as paid for Amazon ${orderId}:`,
+            paymentError
+          );
+
+          if (setting?.emailOnErrors) {
+            sendEmail(setting.errorEmails, "Shopify Order Mark Paid Failed", `Amazon Order ${orderId}, Shopify Order Mark as Paid failed with error ${paymentError}`);
+          }
+
+          continue;
+        }
+
         console.log(`✅ Created Shopify order for Amazon order ${orderId}: ${createOrderResp?.order?.id}`);
+        totalImportCount++;
+        if (!address.address1 && setting?.emailOnErrors) {
+          sendEmail(setting.errorEmails, "Shopify Missing Address", `Amazon Order ${orderId}, Shopify Order Id: ${createOrderResp?.order?.id} is missing address information.`);
+        }
         await DB.orders.update(
           { isPosted: true, orderErrors: null },
           { where: { orderId: orderId } }
@@ -296,18 +440,19 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
         console.log(`🔄 Updated order ${orderId} → isPosted = true`);
       }
 
-      job.attrs.data.lastNextToken = newNextToken;
-      job.attrs.data.lastUpdatedAfter = lastUpdatedAfter;
+      job.attrs.data.lastUpdatedAfter = currentTime;
       await job.save();
 
       if (!newNextToken) break;
       nextToken = newNextToken;
+      await job.touch();
 
       await sleep(5); // 5 seconds between page
     }
 
     console.log("✅ All pages processed successfully.");
-
+    console.log(`📊 Total Amazon Orders Imported: ${totalImportCount}`);
+    job.attrs.data.totalImportCount = totalImportCount;
     job.attrs.state = JOB_STATES.COMPLETED;
     job.attrs.lockedAt = null;
     job.attrs.progress = 100;
@@ -318,6 +463,13 @@ Agenda.define("push-orders-shopify", { concurrency: 15, lockLifetime: 30 * 60000
     console.log("*****************************************************************");
     console.log("*****************************************************************");
   } catch (error) {
+    const setting = await DB.settings.findOne({ where: { id: 1 } });
+    if (!setting) {
+      console.log("⚠️ No settings found");
+    }
+    if (setting?.emailOnErrors) {
+      await sendEmail(setting.errorEmails, "Urgent Jobs are Failing", `Shopify Push Orders Sync Job is failing, error: ${error.message}`);
+    }
     console.log("*****************************************************************");
     console.log("********************   Push Orders Shopify Job RETRY   *******************");
     console.log("*****************************************************************");
