@@ -8,5 +8,6 @@ import packageDetail from "./PackageDetail";
 import settings from "./setting"
 import ProductHealthStats from "./productHealthStats"
 import Customer from "./Customer"
+import CoilAssignment from "./coilAssignment.js"
 
-export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail, settings, ProductHealthStats, Customer };
+export { users, orders, products, inventory, deliveryMethods, confirmShipment, packageDetail, settings, ProductHealthStats, Customer, CoilAssignment };

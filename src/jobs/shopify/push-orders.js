@@ -259,7 +259,22 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
                 },
               },
             ];
-          } else {
+          } else if (shopifyCustomer?.blacklisted?.value == "true") {
+            // blacklisted customer → always use "hardware"
+            console.log("🚫 Customer is blacklisted → forcing 'hardware' delivery method");
+            finalDeliveryMethod = "hardware";
+            shippingLines = [
+              {
+                title: "hardware",
+                code: "hardware",
+                priceSet: {
+                  shopMoney: { amount: "0.0", currencyCode: "EUR" },
+                },
+              },
+            ];
+
+          }
+          else {
             console.log("⚠️ No customer delivery_method metafield found:");
             const customerOrdersResp = await getShopifyOrdersByCustomerEmail(buyerEmail);
 
@@ -271,11 +286,11 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
             if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
-             
+
               const sortedOrders = orders.sort(
                 (a, b) => new Date(a?.node?.processedAt) - new Date(b?.node?.processedAt)
               );
-              
+
               // console.log("🚀 ~ sortedOrders:", JSON.stringify(sortedOrders, null, 2)):
               const firstOrderDate = new Date(sortedOrders[0]?.node?.processedAt);
               const fourWeeksAgo = moment().subtract(4, "weeks").toDate();
@@ -283,6 +298,13 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
               const qualifiesForCoil = firstOrderDate <= fourWeeksAgo;
               if (qualifiesForCoil) {
                 finalDeliveryMethod = "coils";
+                await DB.coilAssignments.create({
+                  customerId: shopifyCustomer?.id,
+                  email: buyerEmail,
+                  assignedAt: new Date(),
+                });
+
+                console.log(`🟢 Coil assignment saved for ${buyerEmail}`);
               } else {
                 finalDeliveryMethod = finalTag;
               }
