@@ -339,6 +339,7 @@ const getShopifyOrder = async (shopifyOrderId) => {
 const getShopifyTodayOrdersCount = async () => {
   try {
     const today = moment().startOf("day").toISOString();
+    console.log("🚀 ~ getShopifyTodayOrdersCount ~ today:", today)
     const graphClient = GetGrapqlClient({ scopes: ["read_orders"] });
 
     let allOrders = [];
@@ -348,7 +349,7 @@ const getShopifyTodayOrdersCount = async () => {
     while (hasNextPage) {
       const query = `
         query getTodayOrders($cursor: String) {
-          orders(first: 250, after: $cursor, query: "created_at:>=${today}") {
+          orders(first: 250, after: $cursor, query: "processed_at:>=${today}") {
             pageInfo {
               hasNextPage
               endCursor
