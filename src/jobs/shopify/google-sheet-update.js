@@ -1,3 +1,4 @@
+import moment from "moment";
 import Agenda from "../../config/agenda-jobs";
 import DB from "../../database";
 import { appendCustomersToSheet } from "../../services/google-apis/client-google-sheet";
@@ -5,19 +6,27 @@ import { getAllCustomers } from "../../services/shopify/customer";
 import { getShopifyTodayOrdersCount } from "../../services/shopify/order";
 import { JOB_STATES } from "../../utils/constants";
 import { sendEmail } from "../../utils/send-email";
+import { Op } from "sequelize";
 
 Agenda.define("google-sheet-update", { concurrency: 1, lockLifetime: 30 * 60000 }, async (job, done) => {
   console.log("*********************************************************");
   console.log("*****************   Google Sheet Update Job STARTED    *******************");
   console.log("*********************************************************");
   try {
-    const { coilsCount, total, success } = await getShopifyTodayOrdersCount();
-    if (success) {
-      await appendCustomersToSheet(coilsCount);
-      console.log(`✅ Found ${total} orders today, including ${coilsCount} coils.`);
-    } else {
-      console.log("❌ Failed to retrieve orders");
-    }
+    const startOfDay = moment().startOf("day").toDate();
+    const endOfDay = moment().endOf("day").toDate();
+
+    const coilsCount = await DB.coilAssignments.count({
+      where: {
+        assignedAt: {
+          [Op.between]: [startOfDay, endOfDay],
+        },
+      },
+    });
+
+    console.log(`🔢 Coils assigned today: ${coilsCount}`);
+
+    await appendCustomersToSheet(coilsCount);
 
     console.log("✅ All pages processed successfully.");
     job.attrs.state = JOB_STATES.COMPLETED;
