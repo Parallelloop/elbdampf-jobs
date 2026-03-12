@@ -7,4 +7,7 @@ const JOB_STATES = {
   NEXT: "_NEXT_",
 };
 
-export { JOB_STATES };
+const DELIVERY_NAMESPACE = "custom";
+const DELIVERY_KEY = "test_delivery";
+
+export { JOB_STATES, DELIVERY_NAMESPACE, DELIVERY_KEY };

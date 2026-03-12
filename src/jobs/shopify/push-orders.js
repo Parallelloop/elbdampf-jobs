@@ -115,6 +115,7 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             where: { asin },
             include: [{ model: DB.deliveryMethod, as: "deliveryMethod" }]
           });
+          console.log("🚀 ~ productRecord:", JSON.stringify(productRecord, null, 2));
 
           const tagFromProduct = productRecord?.deliveryMethod?.tag || null;
           const priorityFromProduct = productRecord?.deliveryMethod?.priority || 0;

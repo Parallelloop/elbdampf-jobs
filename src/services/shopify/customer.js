@@ -47,6 +47,15 @@ const getCustomerByEmail = async (email) => {
                   provinceCode
                   countryCodeV2
                 }
+                metafields(first: 5) {
+                edges {
+                    node {
+                      namespace
+                      key
+                      value
+                    }
+                  }
+                }
               }
             }
           }
@@ -252,6 +261,15 @@ const createCustomer = async (input) => {
             firstName
             lastName
             taxExempt
+            metafields(first: 5) {
+              edges {
+                  node {
+                    namespace
+                    key
+                    value
+                  }
+                }
+            }
             amountSpent {
               amount
               currencyCode
