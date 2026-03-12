@@ -256,6 +256,15 @@ const getShopifyOrdersByCustomerEmail = async (
               email
               createdAt
               processedAt
+              lineItems(first: 50) {
+                edges {
+                  node {
+                    title
+                    quantity
+                    sku
+                  }
+                }
+              }
               shippingLine {
                 title
                 price

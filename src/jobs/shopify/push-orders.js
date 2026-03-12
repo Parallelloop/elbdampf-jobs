@@ -285,7 +285,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
             const orders = customerOrdersResp?.orders || [];
             console.log("🚀 ~ orders:", JSON.stringify(orders, null, 2));
 
-            if (orders.length >= 2 && shopifyCustomer?.blacklisted?.value != "true") {
+            // Check if single order with 2+ units
+            const hasMultiUnitOrder = orders.some(order =>
+              order?.node?.lineItems?.edges?.some(item => item?.node?.quantity >= 2)
+            );
+
+            if ((orders.length >= 2 || hasMultiUnitOrder) && shopifyCustomer?.blacklisted?.value != "true") {
 
               const sortedOrders = orders.sort(
                 (a, b) => new Date(a?.node?.processedAt) - new Date(b?.node?.processedAt)
@@ -296,15 +301,14 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
               const fourWeeksAgo = moment().subtract(4, "weeks").toDate();
 
               const qualifiesForCoil = firstOrderDate <= fourWeeksAgo;
-              if (qualifiesForCoil) {
+              if (qualifiesForCoil || hasMultiUnitOrder) {
                 finalDeliveryMethod = "coils";
                 await DB.coilAssignments.create({
                   customerId: shopifyCustomer?.id,
                   email: buyerEmail,
                   assignedAt: new Date(),
                 });
-
-                console.log(`🟢 Coil assignment saved for ${buyerEmail}`);
+              console.log(`🟢 Coil assigned to ${buyerEmail} — qualifiesForCoil: ${qualifiesForCoil}, hasMultiUnitOrder: ${hasMultiUnitOrder}`);
               } else {
                 finalDeliveryMethod = finalTag;
               }
