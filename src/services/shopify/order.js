@@ -1,3 +1,4 @@
+import moment from "moment";
 import GetGrapqlClient from "./graphql-client";
 
 const createShopifyOrder = async (orderData) => {
@@ -335,9 +336,67 @@ const getShopifyOrder = async (shopifyOrderId) => {
   }
 };
 
+const getShopifyTodayOrdersCount = async () => {
+  try {
+    const today = moment().startOf("day").toISOString();
+    const graphClient = GetGrapqlClient({ scopes: ["read_orders"] });
 
+    let allOrders = [];
+    let hasNextPage = true;
+    let cursor = null;
+
+    while (hasNextPage) {
+      const query = `
+        query getTodayOrders($cursor: String) {
+          orders(first: 250, after: $cursor, query: "created_at:>=${today}") {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                shippingLines(first: 1) {
+                  edges {
+                    node {
+                      title
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+      const response = await graphClient.request(query, { variables: { cursor } });
+      const ordersData = response?.data?.orders;
+
+      const orders = ordersData?.edges?.map(e => e.node) || [];
+      allOrders.push(...orders);
+
+      hasNextPage = ordersData?.pageInfo?.hasNextPage;
+      cursor = ordersData?.pageInfo?.endCursor;
+
+      console.log(`📦 Fetched ${orders.length} orders, total so far: ${allOrders.length}`);
+    }
+
+    const coilsCount = allOrders.filter(order =>
+      order?.shippingLines?.edges?.[0]?.node?.title?.toLowerCase() === "coils"
+    ).length;
+
+    console.log(`🔢 Coils orders: ${coilsCount}`);
+
+    return { success: true, coilsCount, total: allOrders.length };
+
+  } catch (error) {
+    console.error("❌ Failed to fetch today's orders:", error.message);
+    return { success: false, error: error.message };
+  }
+};
 export {
   createShopifyOrder,
+  getShopifyTodayOrdersCount,
   checkShopifyOrder,
   getShopifyOrder,
   shopifyOrderMarkAsPaid,
