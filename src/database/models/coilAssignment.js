@@ -3,6 +3,7 @@ const CoilAssignment = (sequelize, DataTypes) => {
     customerId: {
       type: DataTypes.STRING,
       allowNull: false,
+      unique: true,
     },
     email: {
       type: DataTypes.STRING,
