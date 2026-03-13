@@ -303,12 +303,12 @@ Agenda.define("push-orders-shopify", { concurrency: 1, lockLifetime: 30 * 60000 
               const qualifiesForCoil = firstOrderDate <= fourWeeksAgo;
               if (qualifiesForCoil || hasMultiUnitOrder) {
                 finalDeliveryMethod = "coils";
-                await DB.coilAssignments.create({
+                await DB.coilAssignments.upsert({
                   customerId: shopifyCustomer?.id,
                   email: buyerEmail,
                   assignedAt: new Date(),
                 });
-              console.log(`🟢 Coil assigned to ${buyerEmail} — qualifiesForCoil: ${qualifiesForCoil}, hasMultiUnitOrder: ${hasMultiUnitOrder}`);
+                console.log(`🟢 Coil assigned to ${buyerEmail} — qualifiesForCoil: ${qualifiesForCoil}, hasMultiUnitOrder: ${hasMultiUnitOrder}`);
               } else {
                 finalDeliveryMethod = finalTag;
               }
